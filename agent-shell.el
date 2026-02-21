@@ -78,6 +78,15 @@
 ;; lexical bindings (which would not affect `auto-insert' behavior).
 (defvar auto-insert)
 
+(declare-function flycheck-overlay-errors-at "flycheck")
+(declare-function flycheck-error-column "flycheck")
+(declare-function flycheck-error-end-column "flycheck")
+(declare-function flycheck-error-end-line "flycheck")
+(declare-function flycheck-error-level "flycheck")
+(declare-function flycheck-error-line "flycheck")
+(declare-function flycheck-error-message "flycheck")
+(declare-function flycheck-error-pos "flycheck")
+
 (defcustom agent-shell-permission-icon "⚠"
   "Icon displayed when shell commands require permission to execute.
 

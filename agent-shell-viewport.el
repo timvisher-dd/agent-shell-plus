@@ -61,7 +61,17 @@
 (declare-function agent-shell-ui-backward-block "agent-shell")
 (declare-function agent-shell-ui-forward-block "agent-shell")
 (declare-function agent-shell-ui-mode "agent-shell")
+(declare-function agent-shell-yank-dwim "agent-shell")
 (declare-function agent-shell-completion-mode "agent-shell-completion")
+
+(defvar agent-shell-session-strategy)
+(defvar agent-shell--state)
+(defvar agent-shell-file-completion-enabled)
+(defvar agent-shell-viewport--suffix)
+(defvar agent-shell-viewport--position-cache)
+(defvar agent-shell-viewport--compose-snapshot)
+(defvar agent-shell-viewport-edit-mode-map)
+(defvar agent-shell-viewport-view-mode-map)
 
 (defvar agent-shell-header-style)
 (defvar agent-shell-prefer-viewport-interaction)
@@ -553,7 +563,6 @@ buffer from the snapshot and switch to edit mode."
   (when (agent-shell-viewport--busy-p)
     (user-error "Busy... please wait"))
   (let ((shell-buffer (agent-shell-viewport--shell-buffer))
-        (viewport-buffer (current-buffer))
         (snapshot agent-shell-viewport--compose-snapshot)
         (pos (agent-shell-viewport--position :force-refresh t)))
     ;; Check if at last position going forward with a snapshot to restore

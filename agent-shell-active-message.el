@@ -26,6 +26,7 @@
 
 (eval-when-compile
   (require 'cl-lib))
+(require 'map)
 
 (cl-defun agent-shell-active-message-show (&key text)
   "Show a minibuffer active message displaying TEXT.
