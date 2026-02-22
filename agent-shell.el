@@ -45,6 +45,7 @@
 (require 'dired)
 (require 'json)
 (require 'map)
+(require 'agent-shell-helpers)
 
 ;; Optional Flycheck APIs used for error context.
 (declare-function flycheck-overlay-errors-at "flycheck" (pos))
@@ -144,40 +145,6 @@ When non-nil, user message sections are expanded."
   :type 'boolean
   :group 'agent-shell)
 
-(defcustom agent-shell-path-resolver-function nil
-  "Function for resolving remote paths on the local file-system, and vice versa.
-
-Expects a function that takes the path as its single argument, and
-returns the resolved path.  Set to nil to disable mapping."
-  :type 'function
-  :group 'agent-shell)
-
-(defcustom agent-shell-container-command-runner nil
-  "Command prefix for executing commands in a container.
-
-When non-nil, both the agent command and shell commands will be
-executed using this runner.  Can be a list of strings or a function
-that takes a buffer and returns a list.
-
-Example for static devcontainer:
-  \\='(\"devcontainer\" \"exec\" \"--workspace-folder\" \".\")
-
-Example for dynamic per-agent containers:
-  (lambda (buffer)
-    (let ((config (agent-shell-get-config buffer)))
-      (pcase (map-elt config :identifier)
-        (\\='claude-code \\='(\"docker\" \"exec\" \"claude-dev\" \"--\"))
-        (\\='gemini-cli \\='(\"docker\" \"exec\" \"gemini-dev\" \"--\"))
-        (_ \\='(\"devcontainer\" \"exec\" \".\")))))
-
-Example for per-session containers:
-  (lambda (buffer)
-    (if (string-match \"project-a\" (buffer-name buffer))
-        \\='(\"docker\" \"exec\" \"project-a-dev\" \"--\")
-      \\='(\"docker\" \"exec\" \"project-b-dev\" \"--\")))"
-  :type '(choice (repeat string) function)
-  :group 'agent-shell)
-
 (defcustom agent-shell-section-functions nil
   "Abnormal hook run after overlays are applied (experimental).
 Called in `agent-shell--update-fragment' after all overlays
@@ -214,27 +181,6 @@ Sources are checked in order until one returns non-nil."
                          (const :tag "Current line" line)
                          (function :tag "Custom function")))
   :group 'agent-shell)
-
-(cl-defun agent-shell--make-acp-client (&key command
-                                             command-params
-                                             environment-variables
-                                             context-buffer)
-  "Create an ACP client, optionally wrapping with container runner.
-
-COMMAND, COMMAND-PARAMS, ENVIRONMENT-VARIABLES, and CONTEXT-BUFFER are
-passed through to `acp-make-client'.
-
-If `agent-shell-container-command-runner' is set, the command will be
-wrapped with the runner prefix."
-  (let* ((full-command (append (list command) command-params))
-         (wrapped-command (agent-shell--build-command-for-execution full-command)))
-    (acp-make-client :command (car wrapped-command)
-                     :command-params (cdr wrapped-command)
-                     :environment-variables environment-variables
-                     :context-buffer context-buffer
-                     :outgoing-request-decorator (when context-buffer
-                                                   (map-elt (buffer-local-value 'agent-shell--state context-buffer)
-                                                            :outgoing-request-decorator)))))
 
 (defcustom agent-shell-text-file-capabilities t
   "Whether agents are initialized with read/write text file capabilities.
@@ -368,49 +314,6 @@ Each element can be:
                  (const :tag "Kebab case" kebab-case)
                  (function :tag "Custom format"))
   :group 'agent-shell)
-
-;;;###autoload
-(cl-defun agent-shell-make-agent-config (&key identifier
-                                              mode-line-name welcome-function
-                                              buffer-name shell-prompt shell-prompt-regexp
-                                              client-maker
-                                              needs-authentication
-                                              authenticate-request-maker
-                                              default-model-id
-                                              default-session-mode-id
-                                              icon-name
-                                              install-instructions)
-  "Create an agent configuration alist.
-
-Keyword arguments:
-- IDENTIFIER: Symbol identifying agent type (e.g., \\='claude-code)
-- MODE-LINE-NAME: Name to display in the mode line
-- WELCOME-FUNCTION: Function to call for welcome message
-- BUFFER-NAME: Name of the agent buffer
-- SHELL-PROMPT: The shell prompt string
-- SHELL-PROMPT-REGEXP: Regexp to match the shell prompt
-- CLIENT-MAKER: Function to create the client
-- NEEDS-AUTHENTICATION: Non-nil authentication is required
-- AUTHENTICATE-REQUEST-MAKER: Function to create authentication requests
-- DEFAULT-MODEL-ID: Default model ID (function returning value).
-- DEFAULT-SESSION-MODE-ID: Default session mode ID (function returning value).
-- ICON-NAME: Name of the icon to use
-- INSTALL-INSTRUCTIONS: Instructions to show when executable is not found
-
-Returns an alist with all specified values."
-  `((:identifier . ,identifier)
-    (:mode-line-name . ,mode-line-name)
-    (:welcome-function . ,welcome-function)                     ;; function
-    (:buffer-name . ,buffer-name)
-    (:shell-prompt . ,shell-prompt)
-    (:shell-prompt-regexp . ,shell-prompt-regexp)
-    (:client-maker . ,client-maker)                             ;; function
-    (:needs-authentication . ,needs-authentication)
-    (:authenticate-request-maker . ,authenticate-request-maker) ;; function
-    (:default-model-id . ,default-model-id)                     ;; function
-    (:default-session-mode-id . ,default-session-mode-id)       ;; function
-    (:icon-name . ,icon-name)
-    (:install-instructions . ,install-instructions)))
 
 (defun agent-shell--make-default-agent-configs ()
   "Create a list of default agent configs.
@@ -572,58 +475,6 @@ the session and returns the appropriate endpoint:
                               session-id)))))))"
   :type '(repeat (choice (alist :key-type symbol :value-type sexp) function))
   :group 'agent-shell)
-
-(cl-defun agent-shell--make-state (&key agent-config buffer client-maker needs-authentication authenticate-request-maker heartbeat outgoing-request-decorator)
-  "Construct shell agent state with AGENT-CONFIG and BUFFER.
-
-Shell state is provider-dependent and needs CLIENT-MAKER, NEEDS-AUTHENTICATION,
-HEARTBEAT, AUTHENTICATE-REQUEST-MAKER, and optionally
-OUTGOING-REQUEST-DECORATOR (passed through to `acp-make-client')."
-  (list (cons :agent-config agent-config)
-        (cons :buffer buffer)
-        (cons :client nil)
-        (cons :client-maker client-maker)
-        (cons :outgoing-request-decorator outgoing-request-decorator)
-        (cons :heartbeat heartbeat)
-        (cons :initialized nil)
-        (cons :needs-authentication needs-authentication)
-        (cons :authenticate-request-maker authenticate-request-maker)
-        (cons :authenticated nil)
-        (cons :set-model nil)
-        (cons :set-session-mode nil)
-        (cons :session (list (cons :id nil)
-                             (cons :mode-id nil)
-                             (cons :modes nil)))
-        (cons :last-entry-type nil)
-        (cons :chunked-group-count 0)
-        (cons :request-count 0)
-        (cons :tool-calls nil)
-        (cons :terminals nil)
-        (cons :terminal-count 0)
-        (cons :available-commands nil)
-        (cons :available-modes nil)
-        (cons :supports-session-list nil)
-        (cons :supports-session-load nil)
-        (cons :supports-session-resume nil)
-        (cons :prompt-capabilities nil)
-        (cons :event-subscriptions nil)
-        (cons :pending-requests nil)
-        (cons :usage (list (cons :total-tokens 0)
-                           (cons :input-tokens 0)
-                           (cons :output-tokens 0)
-                           (cons :thought-tokens 0)
-                           (cons :cached-read-tokens 0)
-                           (cons :cached-write-tokens 0)
-                           (cons :context-used 0)
-                           (cons :context-size 0)
-                           (cons :cost-amount 0.0)
-                           (cons :cost-currency nil)))))
-
-(defvar-local agent-shell--state
-    (agent-shell--make-state))
-
-(defvar-local agent-shell--transcript-file nil
-  "Path to the shell's transcript file.")
 
 (defvar agent-shell--shell-maker-config nil)
 
@@ -1105,19 +956,6 @@ This function is intended for use in `agent-shell-container-command-runner'
 functions to access agent config properties like :identifier, :buffer-name, etc."
   (with-current-buffer buffer
     (map-elt agent-shell--state :agent-config)))
-
-(defun agent-shell--build-command-for-execution (command)
-  "Build COMMAND for the configured execution environment.
-
-COMMAND should be a list of command parts (executable and arguments).
-Returns the adapted command if a container runner is configured,
-otherwise returns COMMAND unchanged."
-  (pcase agent-shell-container-command-runner
-    ((pred functionp)
-     (append (funcall agent-shell-container-command-runner
-                      (current-buffer)) command))
-    ((pred listp) (append agent-shell-container-command-runner command))
-    (_ command)))
 
 (defun agent-shell--tool-call-command-to-string (command)
   "Normalize tool call COMMAND to a display string.
@@ -3399,19 +3237,6 @@ SUBSCRIPTION is a token returned by `agent-shell-subscribe-to'."
               (seq-remove (lambda (sub)
                             (equal (map-elt sub :token) subscription))
                           subscriptions))))
-
-(cl-defun agent-shell--emit-event (&key event data)
-  "Emit an EVENT to matching subscribers.
-EVENT is a symbol identifying the event.
-DATA is an optional alist of event-specific data."
-  (let ((event-alist (list (cons :event event))))
-    (when data
-      (push (cons :data data) event-alist))
-    (dolist (sub (map-elt (agent-shell--state) :event-subscriptions))
-      (when (or (not (map-elt sub :event))
-                (eq (map-elt sub :event) event))
-        (with-current-buffer (map-elt (agent-shell--state) :buffer)
-          (funcall (map-elt sub :on-event) event-alist))))))
 
 ;;; Initialization
 
