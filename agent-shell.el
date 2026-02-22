@@ -80,6 +80,7 @@
 (require 'agent-shell-qwen)
 (require 'agent-shell-styles)
 (require 'agent-shell-terminal)
+(require 'agent-shell-fs)
 (require 'agent-shell-usage)
 (require 'agent-shell-worktree)
 (require 'agent-shell-ui)
@@ -131,20 +132,6 @@ See `acp-make-initialize-request' for details."
   :type 'boolean
   :group 'agent-shell)
 
-(defcustom agent-shell-write-inhibit-minor-modes '(aggressive-indent-mode)
-  "List of minor mode commands to inhibit during `fs/write_text_file' edits.
-
-Each element is a minor mode command symbol, such as
-`aggressive-indent-mode'.
-
-Agent Shell disables any listed modes that are enabled in the target
-buffer before applying `fs/write_text_file' edits, and then restores
-them.
-
-Modes whose variables are not buffer-local in the target buffer (for
-example, globalized minor modes) are ignored."
-  :type '(repeat symbol)
-  :group 'agent-shell)
 
 (defcustom agent-shell-display-action
   '(display-buffer-same-window)
@@ -1193,154 +1180,9 @@ COMMAND, when present, may be a shell command string or an argv vector."
             :navigation 'never)
            (map-put! state :last-entry-type nil)))))
 
-(cl-defun agent-shell--extract-buffer-text (&key buffer line limit)
-  "Extract text from BUFFER starting from LINE with optional LIMIT.
-If the buffer's file has changed, prompt the user to reload it."
-  (with-current-buffer buffer
-    (when (and (buffer-file-name)
-               (not (verify-visited-file-modtime))
-               (y-or-n-p (format "%s has changed on file.  Reload? "
-                                 (buffer-name))))
-      (revert-buffer t nil nil))
-    (save-restriction
-      (widen)
-      (save-excursion
-        (goto-char (point-min))
-        (when (and line (> line 1))
-          ;; Seems odd to use forward-line but
-          ;; that's what `goto-line' recommends.
-          (forward-line (1- line)))
-        (let ((start (point)))
-          (if limit
-              ;; Seems odd to use forward-line but
-              ;; that's what `goto-line' recommends.
-              (forward-line limit)
-            (goto-char (point-max)))
-          (buffer-substring-no-properties start (point)))))))
 
-(cl-defun agent-shell--on-fs-read-text-file-request (&key state request)
-  "Handle fs/read_text_file REQUEST with STATE."
-  (let-alist request
-    (condition-case err
-        (let* ((path (agent-shell--resolve-path .params.path))
-               (line (or .params.line 1))
-               (limit .params.limit)
-               (existing-buffer (find-buffer-visiting path))
-               (content (if existing-buffer
-                            ;; Read from open buffer (includes unsaved changes)
-                            (agent-shell--extract-buffer-text :buffer existing-buffer :line line :limit limit)
-                          ;; No open buffer, read from file
-                          (with-temp-buffer
-                            (insert-file-contents path)
-                            (agent-shell--extract-buffer-text :buffer (current-buffer) :line line :limit limit)))))
-          (acp-send-response
-           :client (map-elt state :client)
-           :response (acp-make-fs-read-text-file-response
-                      :request-id .id
-                      :content content)))
-      (quit
-       ;; Handle C-g interrupts during file read prompts
-       (acp-send-response
-        :client (map-elt state :client)
-        :response (acp-make-fs-read-text-file-response
-                   :request-id .id
-                   :error (acp-make-error
-                           :code -32603
-                           :message "Operation cancelled by user"))))
-      (file-missing
-       ;; File doesn't exist - return RESOURCE_NOT_FOUND (-32002).
-       ;; This allows agents to distinguish "file not found" from actual errors.
-       (acp-send-response
-        :client (map-elt state :client)
-        :response (acp-make-fs-read-text-file-response
-                   :request-id .id
-                   :error (acp-make-error
-                           :code -32002
-                           :message "Resource not found"
-                           :data `((path . ,(nth 3 err)))))))
-      (error
-       (acp-send-response
-        :client (map-elt state :client)
-        :response (acp-make-fs-read-text-file-response
-                   :request-id .id
-                   :error (acp-make-error
-                           :code -32603
-                           :message (error-message-string err))))))))
 
-(defun agent-shell--call-with-inhibited-minor-modes (modes thunk)
-  "Call THUNK with MODES temporarily disabled in the current buffer.
 
-Disable each mode in MODES that is enabled in the current buffer and has
-a buffer-local mode variable.  Re-enable any modes disabled by this
-function before returning."
-  (let (disabled)
-    (unwind-protect
-        (progn
-          (dolist (mode modes)
-            (when (and (symbolp mode)
-                       (fboundp mode)
-                       (boundp mode)
-                       (symbol-value mode)
-                       (local-variable-p mode))
-              (funcall mode -1)
-              (push mode disabled)))
-          (funcall thunk))
-      (dolist (mode disabled)
-        (funcall mode 1)))))
-
-(cl-defun agent-shell--on-fs-write-text-file-request (&key state request)
-  "Handle fs/write_text_file REQUEST with STATE."
-  (let-alist request
-    (condition-case err
-        (let* ((path (agent-shell--resolve-path .params.path))
-               (content .params.content)
-               (dir (file-name-directory path))
-               (buffer (or (find-buffer-visiting path)
-                           ;; Prevent auto-insert-mode
-                           ;; See issue #170
-                           (let ((auto-insert nil))
-                             (find-file-noselect path)))))
-          (when (and dir (not (file-exists-p dir)))
-            (make-directory dir t))
-          (with-temp-buffer
-            (insert content)
-            (let ((content-buffer (current-buffer))
-                  (inhibit-read-only t))
-              (with-current-buffer buffer
-                (save-restriction
-                  (widen)
-                  ;; Set a time-out to prevent locking up on large files
-                  ;; https://github.com/xenodium/agent-shell/issues/168
-                  (agent-shell--call-with-inhibited-minor-modes
-                   agent-shell-write-inhibit-minor-modes
-                   (lambda ()
-                     (replace-buffer-contents content-buffer 1.0)))
-                  (basic-save-buffer)))))
-          (agent-shell--emit-event
-           :event 'file-write
-           :data (list (cons :path path)
-                       (cons :content content)))
-          (acp-send-response
-           :client (map-elt state :client)
-           :response (acp-make-fs-write-text-file-response
-                      :request-id .id)))
-      (quit
-       ;; Handle C-g interrupts during file save prompts
-       (acp-send-response
-        :client (map-elt state :client)
-        :response (acp-make-fs-write-text-file-response
-                   :request-id .id
-                   :error (acp-make-error
-                           :code -32603
-                           :message "Operation cancelled by user"))))
-      (error
-       (acp-send-response
-        :client (map-elt state :client)
-        :response (acp-make-fs-write-text-file-response
-                   :request-id .id
-                   :error (acp-make-error
-                           :code -32603
-                           :message (error-message-string err))))))))
 
 (defun agent-shell--resolve-path (path)
   "Resolve PATH using `agent-shell-path-resolver-function'."
@@ -1742,16 +1584,16 @@ for details."
 (defun agent-shell--format-buffer-name (agent-name project-name)
   "Format `agent-shell' buffer name using AGENT-NAME and PROJECT-NAME."
   (pcase agent-shell-buffer-name-format
-        ((pred functionp)
-         (funcall agent-shell-buffer-name-format agent-name project-name))
-        ('kebab-case
-         (format "%s-agent @ %s"
-                 (downcase (replace-regexp-in-string " " "-" agent-name))
-                 project-name))
-        ('default
-         (format "%s Agent @ %s"
-                 agent-name
-                 project-name))))
+    ((pred functionp)
+     (funcall agent-shell-buffer-name-format agent-name project-name))
+    ('kebab-case
+     (format "%s-agent @ %s"
+             (downcase (replace-regexp-in-string " " "-" agent-name))
+             project-name))
+    ('default
+     (format "%s Agent @ %s"
+             agent-name
+             project-name))))
 
 (cl-defun agent-shell--apply (&key function alist)
   "Apply keyword ALIST to FUNCTION.
@@ -3006,8 +2848,8 @@ Falls back to latest session in batch mode (e.g. tests)."
                                 :request (let ((cwd (agent-shell--resolve-path (agent-shell-cwd)))
                                                (mcp-servers (agent-shell--mcp-servers)))
                                            (let ((use-resume (if agent-shell-prefer-session-resume
-                                                                  (map-elt (agent-shell--state) :supports-session-resume)
-                                                                (not (map-elt (agent-shell--state) :supports-session-load)))))
+                                                                 (map-elt (agent-shell--state) :supports-session-resume)
+                                                               (not (map-elt (agent-shell--state) :supports-session-load)))))
                                              (if use-resume
                                                  (acp-make-session-resume-request
                                                   :session-id acp-session-id
@@ -4459,23 +4301,23 @@ Mark model using CURRENT-MODEL-ID."
 ;;; Transient
 
 (transient-define-prefix agent-shell-help-menu ()
-  "Transient menu for `agent-shell' commands."
-  [["Navigation"
-    ("<tab>" "Next item" agent-shell-next-item :transient t)
-    ("<backtab>" "Previous item" agent-shell-previous-item :transient t)]
-   ["Insert"
-    ("!" "Shell command" agent-shell-insert-shell-command-output :transient t)
-    ("@" "File" agent-shell-insert-file :transient t)
-    ("d" "Dwim" agent-shell-send-dwim :transient t)
-    ]]
-  [["Session"
-    ("m" "Cycle modes" agent-shell-cycle-session-mode :transient t)
-    ("M" "Set mode" agent-shell-set-session-mode :transient t)
-    ("v" "Set model" agent-shell-set-session-model :transient t)
-    ("C" "Interrupt" agent-shell-interrupt :transient t)]
-   ["Shell"
-    ("b" "Toggle" agent-shell-toggle :transient t)
-    ("N" "New shell" agent-shell-new-shell)]])
+			 "Transient menu for `agent-shell' commands."
+			 [["Navigation"
+			   ("<tab>" "Next item" agent-shell-next-item :transient t)
+			   ("<backtab>" "Previous item" agent-shell-previous-item :transient t)]
+			  ["Insert"
+			   ("!" "Shell command" agent-shell-insert-shell-command-output :transient t)
+			   ("@" "File" agent-shell-insert-file :transient t)
+			   ("d" "Dwim" agent-shell-send-dwim :transient t)
+			   ]]
+			 [["Session"
+			   ("m" "Cycle modes" agent-shell-cycle-session-mode :transient t)
+			   ("M" "Set mode" agent-shell-set-session-mode :transient t)
+			   ("v" "Set model" agent-shell-set-session-model :transient t)
+			   ("C" "Interrupt" agent-shell-interrupt :transient t)]
+			  ["Shell"
+			   ("b" "Toggle" agent-shell-toggle :transient t)
+			   ("N" "New shell" agent-shell-new-shell)]])
 
 ;;; Transcript
 

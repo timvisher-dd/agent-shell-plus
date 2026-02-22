@@ -36,6 +36,7 @@
 (require 'agent-shell-meta)
 (require 'agent-shell-helpers)
 (require 'agent-shell-project)
+(require 'agent-shell-fs)
 (require 'agent-shell-ui-helpers)
 (require 'agent-shell-tools)
 (require 'agent-shell-usage)
