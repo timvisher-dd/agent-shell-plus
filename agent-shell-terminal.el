@@ -34,15 +34,13 @@
 (require 'map)
 (require 'subr-x)
 (require 'agent-shell-meta)
+(require 'agent-shell-helpers)
+(require 'agent-shell-project)
 (require 'agent-shell-ui-helpers)
 (require 'agent-shell-tools)
+(require 'agent-shell-usage)
 
-(declare-function agent-shell--build-command-for-execution "agent-shell")
-(declare-function agent-shell--resolve-path "agent-shell")
-(declare-function agent-shell-cwd "agent-shell")
 
-(declare-function agent-shell--append-tool-call-output "agent-shell-ui-helpers")
-(declare-function agent-shell--tool-call-append-output-chunk "agent-shell-ui-helpers")
 
 (defvar agent-shell--state)
 
