@@ -1183,9 +1183,6 @@ COMMAND, when present, may be a shell command string or an argv vector."
 
 
 
-(defun agent-shell--resolve-path (path)
-  "Resolve PATH using `agent-shell-path-resolver-function'."
-  (funcall (or agent-shell-path-resolver-function #'identity) path))
 
 (defun agent-shell--get-devcontainer-workspace-path (cwd)
   "Return devcontainer workspaceFolder for CWD, or default value if none found.
@@ -1300,68 +1297,6 @@ Example output:
                                'font-lock-face 'font-lock-comment-face))))
      :joiner "\n")))
 
-(cl-defun agent-shell--make-diff-info (&key tool-call)
-  "Make diff information from TOOL-CALL.
-
-TOOL-CALL is an ACP tool call object that may contain diff info in
-either `content' (standard ACP format) or `rawInput' (eg.  Copilot).
-
-Standard ACP format uses content with type \"diff\" containing
-oldText/newText/path fields.
-
-See https://agentclientprotocol.com/protocol/schema#toolcallcontent
-
-Copilot sends old_str/new_str/path in rawInput instead.
-
-See https://github.com/xenodium/agent-shell/issues/217
-
-Returns in the form:
-
- `((:old . old-text)
-   (:new . new-text)
-   (:file . file-path))."
-  (let ((content (map-elt tool-call 'content))
-        (raw-input (map-elt tool-call 'rawInput)))
-    (when-let* ((diff-item (cond
-                            ;; Single diff object
-                            ((and content (equal (map-elt content 'type) "diff"))
-                             content)
-                            ;; TODO: Is this needed?
-                            ;; Isn't content always an alist?
-                            ;; Vector/array content - find diff item
-                            ((vectorp content)
-                             (seq-find (lambda (item)
-                                         (equal (map-elt item 'type) "diff"))
-                                       content))
-                            ;; TODO: Is this needed?
-                            ;; Isn't content always an alist?
-                            ;; List content - find diff item
-                            ((and content (listp content))
-                             (seq-find (lambda (item)
-                                         (equal (map-elt item 'type) "diff"))
-                                       content))
-                            ;; Attempt to get from rawInput.
-                            ((and raw-input (map-elt raw-input 'new_str))
-                             `((oldText . ,(or (map-elt raw-input 'old_str) ""))
-                               (newText . ,(map-elt raw-input 'new_str))
-                               (path . ,(map-elt raw-input 'path))))
-                            ;; Attempt diff from rawInput (eg. Copilot).
-                            ((and raw-input (map-elt raw-input 'diff))
-                             (let ((parsed (agent-shell--parse-unified-diff
-                                            (map-elt raw-input 'diff))))
-                               `((oldText . ,(car parsed))
-                                 (newText . ,(cdr parsed))
-                                 (path . ,(or (map-elt raw-input 'fileName)
-                                              (map-elt raw-input 'path))))))))
-                ;; oldText can be nil for Write tools creating new files, default to ""
-                ;; TODO: Currently don't have a way to capture overwrites
-                (old-text (or (map-elt diff-item 'oldText) ""))
-                (new-text (map-elt diff-item 'newText))
-                (file-path (map-elt diff-item 'path)))
-      (append (list (cons :old old-text)
-                    (cons :new new-text))
-              (when file-path
-                (list (cons :file file-path)))))))
 
 ;; Based on https://github.com/editor-code-assistant/eca-emacs/blob/298849d1aae3241bf8828b6558c6deb45d75a3c8/eca-diff.el#L22
 (defun agent-shell--parse-unified-diff (diff-string)
@@ -1382,48 +1317,6 @@ Returns a cons cell (OLD-TEXT . NEW-TEXT)."
     (cons (string-join (nreverse old-lines) "\n")
           (string-join (nreverse new-lines) "\n"))))
 
-(defun agent-shell--format-diff-as-text (diff)
-  "Format DIFF info as text suitable for display in tool call body.
-
-DIFF should be in the form returned by `agent-shell--make-diff-info':
-  ((:old . old-text) (:new . new-text) (:file . file-path))"
-  (when-let (diff
-             (old-file (make-temp-file "old"))
-             (new-file (make-temp-file "new")))
-    (unwind-protect
-        (progn
-          (with-temp-file old-file (insert (map-elt diff :old)))
-          (with-temp-file new-file (insert (map-elt diff :new)))
-          (with-temp-buffer
-            (call-process "diff" nil t nil "-U3" old-file new-file)
-            ;; Remove file header lines with timestamps
-            (goto-char (point-min))
-            (when (looking-at "^---")
-              (delete-region (point) (progn (forward-line 1) (point))))
-            (when (looking-at "^\\+\\+\\+")
-              (delete-region (point) (progn (forward-line 1) (point))))
-            ;; Apply diff syntax highlighting
-            (goto-char (point-min))
-            (while (not (eobp))
-              (let ((line-start (point))
-                    (line-end (line-end-position)))
-                (cond
-                 ;; Removed lines (start with -)
-                 ((looking-at "^-")
-                  (add-text-properties line-start line-end
-                                       '(font-lock-face diff-removed)))
-                 ;; Added lines (start with +)
-                 ((looking-at "^\\+")
-                  (add-text-properties line-start line-end
-                                       '(font-lock-face diff-added)))
-                 ;; Hunk headers (@@)
-                 ((looking-at "^@@")
-                  (add-text-properties line-start line-end
-                                       '(font-lock-face diff-hunk-header))))
-                (forward-line 1)))
-            (buffer-string)))
-      (delete-file old-file)
-      (delete-file new-file))))
 (cl-defun agent-shell--make-error-handler (&key state shell-buffer)
   "Create ACP error handler with SHELL-BUFFER STATE."
   (lambda (error raw-message)
@@ -3651,41 +3544,6 @@ Available values:
         (:line-end . ,(save-excursion (goto-char end) (line-number-at-pos)))
         (:content . ,content)))))
 
-(cl-defun agent-shell--align-alist (&key data columns (separator "  ") joiner)
-  "Align COLUMNS from DATA.
-
-DATA is a list of alists.  COLUMNS is a list of extractor functions,
-where each extractor takes one alist and returns a string for that
-column.  SEPARATOR is the string used to join columns (defaults to
-two spaces).  JOINER, when provided, wraps the result with
-`string-join' using JOINER as the separator.
-
-Returns a list of strings with spaced-aligned columns, or a single
-joined string if JOINER is provided."
-  (let* ((rows (mapcar
-                (lambda (item)
-                  (mapcar (lambda (extractor) (funcall extractor item))
-                          columns))
-                data))
-         (widths (seq-reduce
-                  (lambda (acc row)
-                    (seq-mapn #'max
-                              acc
-                              (mapcar (lambda (cell) (length (or cell ""))) row)))
-                  rows
-                  (make-list (length columns) 0)))
-         (result (mapcar (lambda (row)
-                           (string-trim-right
-                            (string-join
-                             (seq-mapn (lambda (cell width)
-                                         (format (format "%%-%ds" width) (or cell "")))
-                                       row
-                                       widths)
-                             separator)))
-                         rows)))
-    (if joiner
-        (string-join result joiner)
-      result)))
 
 (cl-defun agent-shell--get-decorated-region (&key deactivate)
   "Get the active region decorated with file path and Markdown code block.
@@ -3709,29 +3567,7 @@ When DEACTIVATE is non-nil, deactivate region/selection."
 
 ;;; Session modes
 
-(defun agent-shell--get-available-modes (state)
-  "Get available modes list, preferring session modes over agent modes.
 
-STATE is the agent shell state.
-
-Returns the modes list from session if available, otherwise from
-the agent's available modes."
-  (or (map-nested-elt state '(:session :modes))
-      ;; Use agent-level availability as fallback.
-      (map-nested-elt state '(:available-modes :modes))))
-
-(defun agent-shell--resolve-session-mode-name (mode-id available-session-modes)
-  "Get the name of the session mode with MODE-ID from AVAILABLE-SESSION-MODES.
-
-AVAILABLE-SESSION-MODES is the list of mode objects from the ACP
-session/new response.  Each mode has an `:id' and `:name' field.
-We look up the mode by ID to get its display name.
-
-See https://agentclientprotocol.com/protocol/session-modes for details."
-  (when-let ((mode (seq-find (lambda (m)
-                               (string= mode-id (map-elt m :id)))
-                             available-session-modes)))
-    (map-elt mode :name)))
 
 
 
