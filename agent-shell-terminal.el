@@ -35,6 +35,7 @@
 (require 'subr-x)
 (require 'agent-shell-meta)
 (require 'agent-shell-ui-helpers)
+(require 'agent-shell-tools)
 
 (declare-function agent-shell--build-command-for-execution "agent-shell")
 (declare-function agent-shell--resolve-path "agent-shell")
@@ -322,180 +323,180 @@ Use TERMINAL when already looked up."
            (let ((update (map-elt (map-elt notification 'params) 'update)))
              (condition-case err
                  (cond
-              ((equal (map-elt update 'sessionUpdate) "tool_call")
-               (agent-shell--save-tool-call
-                state
-                (map-elt update 'toolCallId)
-                (append (list (cons :title (cond
-                                            ((and (string= (map-elt update 'title) "Skill")
-                                                  (map-nested-elt update '(rawInput command)))
-                                             (format "Skill: %s"
-                                                     (map-nested-elt update '(rawInput command))))
-                                            (t
-                                             (map-elt update 'title))))
-                              (cons :status (map-elt update 'status))
-                              (cons :kind (map-elt update 'kind))
-                              (cons :command (map-nested-elt update '(rawInput command)))
-                              (cons :description (map-nested-elt update '(rawInput description)))
-                              (cons :content (map-elt update 'content)))
-                        (when-let ((diff (agent-shell--make-diff-info :tool-call update)))
-                          (list (cons :diff diff)))))
-               (agent-shell--emit-event
-                :event 'tool-call-update
-                :data (list (cons :tool-call-id (map-elt update 'toolCallId))
-                            (cons :tool-call (map-nested-elt state (list :tool-calls (map-elt update 'toolCallId))))))
-               (let ((tool-call-labels (agent-shell-make-tool-call-label
-                                        state (map-elt update 'toolCallId))))
-                 (agent-shell--update-fragment
-                  :state state
-                  :block-id (map-elt update 'toolCallId)
-                  :label-left (map-elt tool-call-labels :status)
-                  :label-right (map-elt tool-call-labels :title)
-                  :expanded agent-shell-tool-use-expand-by-default)
-                 ;; Display plan as markdown block if present
-                 (when-let ((plan (map-nested-elt update '(rawInput plan))))
-                   (agent-shell--update-fragment
-                    :state state
-                    :block-id (concat (map-elt update 'toolCallId) "-plan")
-                    :label-left (propertize "Proposed plan" 'font-lock-face 'font-lock-doc-markup-face)
-                    :body plan
-                    :expanded t)))
-               (agent-shell--terminal-link-tool-call-content
-                state (map-elt update 'toolCallId) (map-elt update 'content))
-               (map-put! state :last-entry-type "tool_call"))
-              ((equal (map-elt update 'sessionUpdate) "agent_thought_chunk")
-               (let-alist update
-                 (let* ((request-id (map-elt state :request-count))
-                        (thought-request-id (map-elt state :thought-request-id))
-                        (reuse (and request-id (equal request-id thought-request-id)))
-                        (block-id (map-elt state :thought-block-id))
-                        (append nil))
-                   (unless reuse
+		  ((equal (map-elt update 'sessionUpdate) "tool_call")
+		   (agent-shell--save-tool-call
+                    state
+                    (map-elt update 'toolCallId)
+                    (append (list (cons :title (cond
+						((and (string= (map-elt update 'title) "Skill")
+                                                      (map-nested-elt update '(rawInput command)))
+						 (format "Skill: %s"
+							 (map-nested-elt update '(rawInput command))))
+						(t
+						 (map-elt update 'title))))
+				  (cons :status (map-elt update 'status))
+				  (cons :kind (map-elt update 'kind))
+				  (cons :command (map-nested-elt update '(rawInput command)))
+				  (cons :description (map-nested-elt update '(rawInput description)))
+				  (cons :content (map-elt update 'content)))
+                            (when-let ((diff (agent-shell--make-diff-info :tool-call update)))
+                              (list (cons :diff diff)))))
+		   (agent-shell--emit-event
+                    :event 'tool-call-update
+                    :data (list (cons :tool-call-id (map-elt update 'toolCallId))
+				(cons :tool-call (map-nested-elt state (list :tool-calls (map-elt update 'toolCallId))))))
+		   (let ((tool-call-labels (agent-shell-make-tool-call-label
+                                            state (map-elt update 'toolCallId))))
+                     (agent-shell--update-fragment
+                      :state state
+                      :block-id (map-elt update 'toolCallId)
+                      :label-left (map-elt tool-call-labels :status)
+                      :label-right (map-elt tool-call-labels :title)
+                      :expanded agent-shell-tool-use-expand-by-default)
+                     ;; Display plan as markdown block if present
+                     (when-let ((plan (map-nested-elt update '(rawInput plan))))
+                       (agent-shell--update-fragment
+			:state state
+			:block-id (concat (map-elt update 'toolCallId) "-plan")
+			:label-left (propertize "Proposed plan" 'font-lock-face 'font-lock-doc-markup-face)
+			:body plan
+			:expanded t)))
+		   (agent-shell--terminal-link-tool-call-content
+                    state (map-elt update 'toolCallId) (map-elt update 'content))
+		   (map-put! state :last-entry-type "tool_call"))
+		  ((equal (map-elt update 'sessionUpdate) "agent_thought_chunk")
+		   (let-alist update
+                     (let* ((request-id (map-elt state :request-count))
+                            (thought-request-id (map-elt state :thought-request-id))
+                            (reuse (and request-id (equal request-id thought-request-id)))
+                            (block-id (map-elt state :thought-block-id))
+                            (append nil))
+                       (unless reuse
+			 (map-put! state :chunked-group-count (1+ (map-elt state :chunked-group-count)))
+			 (setq block-id (format "%s-agent_thought_chunk"
+						(map-elt state :chunked-group-count)))
+			 (map-put! state :thought-request-id request-id)
+			 (map-put! state :thought-block-id block-id))
+                       (when reuse
+			 (if block-id
+                             (setq append t)
+			   (setq block-id (format "%s-agent_thought_chunk"
+						  (map-elt state :chunked-group-count)))
+			   (map-put! state :thought-block-id block-id)))
+                       (agent-shell--update-fragment
+			:state state
+			:block-id block-id
+			:label-left  (concat
+                                      agent-shell-thought-process-icon
+                                      " "
+                                      (propertize "Thought process" 'font-lock-face font-lock-doc-markup-face))
+			:body .content.text
+			:append append
+			:expanded agent-shell-thought-process-expand-by-default)))
+		   (map-put! state :last-entry-type "agent_thought_chunk"))
+		  ((equal (map-elt update 'sessionUpdate) "agent_message_chunk")
+		   (unless (equal (map-elt state :last-entry-type) "agent_message_chunk")
                      (map-put! state :chunked-group-count (1+ (map-elt state :chunked-group-count)))
-                     (setq block-id (format "%s-agent_thought_chunk"
-                                            (map-elt state :chunked-group-count)))
-                     (map-put! state :thought-request-id request-id)
-                     (map-put! state :thought-block-id block-id))
-                   (when reuse
-                     (if block-id
-                         (setq append t)
-                       (setq block-id (format "%s-agent_thought_chunk"
-                                              (map-elt state :chunked-group-count)))
-                       (map-put! state :thought-block-id block-id)))
-                 (agent-shell--update-fragment
-                  :state state
-                  :block-id block-id
-                  :label-left  (concat
-                                agent-shell-thought-process-icon
-                                " "
-                                (propertize "Thought process" 'font-lock-face font-lock-doc-markup-face))
-                  :body .content.text
-                  :append append
-                  :expanded agent-shell-thought-process-expand-by-default)))
-               (map-put! state :last-entry-type "agent_thought_chunk"))
-              ((equal (map-elt update 'sessionUpdate) "agent_message_chunk")
-               (unless (equal (map-elt state :last-entry-type) "agent_message_chunk")
-                 (map-put! state :chunked-group-count (1+ (map-elt state :chunked-group-count)))
-                 (agent-shell--append-transcript
-                  :text (format "## Agent (%s)\n\n" (format-time-string "%F %T"))
-                  :file-path agent-shell--transcript-file))
-               (let-alist update
-                 (agent-shell--append-transcript
-                  :text .content.text
-                  :file-path agent-shell--transcript-file)
-                 (agent-shell--update-fragment
-                  :state state
-                  :block-id (format "%s-agent_message_chunk"
-                                    (map-elt state :chunked-group-count))
-                  :body .content.text
-                  :create-new (not (equal (map-elt state :last-entry-type)
-                                          "agent_message_chunk"))
-                  :append t
-                  :navigation 'never))
-               (map-put! state :last-entry-type "agent_message_chunk"))
-              ((equal (map-elt update 'sessionUpdate) "user_message_chunk")
-               (let ((new-prompt-p (not (equal (map-elt state :last-entry-type)
-                                               "user_message_chunk"))))
-                 (when new-prompt-p
-                   (map-put! state :chunked-group-count (1+ (map-elt state :chunked-group-count)))
-                   (agent-shell--append-transcript
-                    :text (format "## User (%s)\n\n" (format-time-string "%F %T"))
-                    :file-path agent-shell--transcript-file))
-                 (let-alist update
-                   (agent-shell--append-transcript
-                    :text (format "> %s\n" .content.text)
-                    :file-path agent-shell--transcript-file)
-                   (agent-shell--update-text
+                     (agent-shell--append-transcript
+                      :text (format "## Agent (%s)\n\n" (format-time-string "%F %T"))
+                      :file-path agent-shell--transcript-file))
+		   (let-alist update
+                     (agent-shell--append-transcript
+                      :text .content.text
+                      :file-path agent-shell--transcript-file)
+                     (agent-shell--update-fragment
+                      :state state
+                      :block-id (format "%s-agent_message_chunk"
+					(map-elt state :chunked-group-count))
+                      :body .content.text
+                      :create-new (not (equal (map-elt state :last-entry-type)
+                                              "agent_message_chunk"))
+                      :append t
+                      :navigation 'never))
+		   (map-put! state :last-entry-type "agent_message_chunk"))
+		  ((equal (map-elt update 'sessionUpdate) "user_message_chunk")
+		   (let ((new-prompt-p (not (equal (map-elt state :last-entry-type)
+						   "user_message_chunk"))))
+                     (when new-prompt-p
+                       (map-put! state :chunked-group-count (1+ (map-elt state :chunked-group-count)))
+                       (agent-shell--append-transcript
+			:text (format "## User (%s)\n\n" (format-time-string "%F %T"))
+			:file-path agent-shell--transcript-file))
+                     (let-alist update
+                       (agent-shell--append-transcript
+			:text (format "> %s\n" .content.text)
+			:file-path agent-shell--transcript-file)
+                       (agent-shell--update-text
+			:state state
+			:block-id (format "%s-user_message_chunk"
+					  (map-elt state :chunked-group-count))
+			:text (if new-prompt-p
+				  (concat (propertize
+					   (map-nested-elt
+                                            state '(:agent-config :shell-prompt))
+					   'font-lock-face 'comint-highlight-prompt)
+					  (propertize .content.text
+                                                      'font-lock-face 'comint-highlight-input))
+				(propertize .content.text
+                                            'font-lock-face 'comint-highlight-input))
+			:create-new new-prompt-p
+			:append t)))
+		   (map-put! state :last-entry-type "user_message_chunk"))
+		  ((equal (map-elt update 'sessionUpdate) "plan")
+		   (let-alist update
+                     (agent-shell--update-fragment
+                      :state state
+                      :block-id "plan"
+                      :label-left (propertize "Plan" 'font-lock-face 'font-lock-doc-markup-face)
+                      :body (agent-shell--format-plan .entries)
+                      :expanded t))
+		   (map-put! state :last-entry-type "plan"))
+		  ((equal (map-elt update 'sessionUpdate) "tool_call_update")
+		   (agent-shell--handle-tool-call-update-streaming state update)
+		   (agent-shell--terminal-link-tool-call-content
+                    state (map-elt update 'toolCallId) (map-elt update 'content))
+		   (map-put! state :last-entry-type "tool_call_update"))
+		  ((equal (map-elt update 'sessionUpdate) "available_commands_update")
+		   (let-alist update
+                     (map-put! state :available-commands (map-elt update 'availableCommands))
+                     (agent-shell--update-fragment
+                      :state state
+                      :namespace-id "bootstrapping"
+                      :block-id "available_commands_update"
+                      :label-left (propertize "Available commands" 'font-lock-face 'font-lock-doc-markup-face)
+                      :body (agent-shell--format-available-commands (map-elt update 'availableCommands))))
+		   (map-put! state :last-entry-type "available_commands_update"))
+		  ((equal (map-elt update 'sessionUpdate) "current_mode_update")
+		   (let ((updated-session (map-elt state :session))
+			 (new-mode-id (map-elt update 'currentModeId)))
+                     (map-put! updated-session :mode-id new-mode-id)
+                     (map-put! state :session updated-session)
+                     (message "Session mode: %s"
+                              (agent-shell--resolve-session-mode-name
+                               new-mode-id
+                               (agent-shell--get-available-modes state)))
+                     ;; Note: No need to set :last-entry-type as no text was inserted.
+                     (agent-shell--update-header-and-mode-line)))
+		  ((equal (map-elt update 'sessionUpdate) "config_option_update")
+		   ;; Silently handle config option updates (e.g., from set_model/set_mode)
+		   ;; These are informational notifications that don't require user-visible output
+		   ;; Note: No need to set :last-entry-type as no text was inserted.
+		   nil)
+		  ((equal (map-elt update 'sessionUpdate) "usage_update")
+		   ;; Extract context window and cost information
+		   (agent-shell--update-usage-from-notification :state state :update update)
+		   ;; Update header to reflect new context usage indicator
+		   (agent-shell--update-header-and-mode-line)
+		   ;; Note: This is session-level state, no need to set :last-entry-type
+		   nil)
+		  (t
+		   (agent-shell--update-fragment
                     :state state
-                    :block-id (format "%s-user_message_chunk"
-                                      (map-elt state :chunked-group-count))
-                    :text (if new-prompt-p
-                              (concat (propertize
-                                       (map-nested-elt
-                                        state '(:agent-config :shell-prompt))
-                                       'font-lock-face 'comint-highlight-prompt)
-                                      (propertize .content.text
-                                                  'font-lock-face 'comint-highlight-input))
-                            (propertize .content.text
-                                        'font-lock-face 'comint-highlight-input))
-                    :create-new new-prompt-p
-                    :append t)))
-               (map-put! state :last-entry-type "user_message_chunk"))
-              ((equal (map-elt update 'sessionUpdate) "plan")
-               (let-alist update
-                 (agent-shell--update-fragment
-                  :state state
-                  :block-id "plan"
-                  :label-left (propertize "Plan" 'font-lock-face 'font-lock-doc-markup-face)
-                  :body (agent-shell--format-plan .entries)
-                  :expanded t))
-               (map-put! state :last-entry-type "plan"))
-              ((equal (map-elt update 'sessionUpdate) "tool_call_update")
-               (agent-shell--handle-tool-call-update-streaming state update)
-               (agent-shell--terminal-link-tool-call-content
-                state (map-elt update 'toolCallId) (map-elt update 'content))
-               (map-put! state :last-entry-type "tool_call_update"))
-              ((equal (map-elt update 'sessionUpdate) "available_commands_update")
-               (let-alist update
-                 (map-put! state :available-commands (map-elt update 'availableCommands))
-                 (agent-shell--update-fragment
-                  :state state
-                  :namespace-id "bootstrapping"
-                  :block-id "available_commands_update"
-                  :label-left (propertize "Available commands" 'font-lock-face 'font-lock-doc-markup-face)
-                  :body (agent-shell--format-available-commands (map-elt update 'availableCommands))))
-               (map-put! state :last-entry-type "available_commands_update"))
-              ((equal (map-elt update 'sessionUpdate) "current_mode_update")
-               (let ((updated-session (map-elt state :session))
-                     (new-mode-id (map-elt update 'currentModeId)))
-                 (map-put! updated-session :mode-id new-mode-id)
-                 (map-put! state :session updated-session)
-                 (message "Session mode: %s"
-                          (agent-shell--resolve-session-mode-name
-                           new-mode-id
-                           (agent-shell--get-available-modes state)))
-                 ;; Note: No need to set :last-entry-type as no text was inserted.
-                 (agent-shell--update-header-and-mode-line)))
-              ((equal (map-elt update 'sessionUpdate) "config_option_update")
-               ;; Silently handle config option updates (e.g., from set_model/set_mode)
-               ;; These are informational notifications that don't require user-visible output
-               ;; Note: No need to set :last-entry-type as no text was inserted.
-               nil)
-              ((equal (map-elt update 'sessionUpdate) "usage_update")
-               ;; Extract context window and cost information
-               (agent-shell--update-usage-from-notification :state state :update update)
-               ;; Update header to reflect new context usage indicator
-               (agent-shell--update-header-and-mode-line)
-               ;; Note: This is session-level state, no need to set :last-entry-type
-               nil)
-              (t
-               (agent-shell--update-fragment
-                :state state
-                :block-id "Session Update - fallback"
-                :body (format "%s" notification)
-                :create-new t
-                :navigation 'never)
-               (map-put! state :last-entry-type nil)))
+                    :block-id "Session Update - fallback"
+                    :body (format "%s" notification)
+                    :create-new t
+                    :navigation 'never)
+		   (map-put! state :last-entry-type nil)))
                (error
                 (unless (eq (car err) 'quit)
                   (agent-shell--debug-log-notification-error state update err))

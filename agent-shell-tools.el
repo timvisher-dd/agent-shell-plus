@@ -34,9 +34,9 @@
 (require 'seq)
 (require 'subr-x)
 (require 'agent-shell-helpers)
-(require 'agent-shell-terminal)
 (require 'agent-shell-ui-helpers)
 (require 'agent-shell-meta)
+(declare-function agent-shell--terminal-unlink-tool-call-content "agent-shell-terminal" (state tool-call-id content))
 
 (defun agent-shell--tool-call-content-text (content)
   "Return concatenated text from tool call CONTENT items."
