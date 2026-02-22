@@ -40,6 +40,7 @@
 (require 'agent-shell-ui-helpers)
 (require 'agent-shell-tools)
 (require 'agent-shell-usage)
+(require 'agent-shell-header)
 
 
 
@@ -314,6 +315,11 @@ Use TERMINAL when already looked up."
                                  (agent-shell--terminal-remove state terminal-id))))))))))
         (setf (map-elt entry :cleanup-timer) timer)
         (agent-shell--terminal-put state terminal-id entry)))))
+
+(defun agent-shell--debug-log-notification-error (_state update err)
+  "Log notification UPDATE error ERR."
+  (message "agent-shell notification error: %S" (list :update update :error err)))
+
 
 (cl-defun agent-shell--on-notification (&key state notification)
   "Handle incoming notification using SHELL, STATE, and NOTIFICATION."
