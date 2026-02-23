@@ -171,10 +171,10 @@ INCLUDE-CONTENT and INCLUDE-DIFF control optional fields."
         (agent-shell--handle-tool-call-update
          state
          update
-         ;; Don't re-render output that was already streamed to the buffer.
+         ;; When output was already streamed to the buffer, pass nil
+         ;; so the final update only refreshes status/title, not body.
          (unless (or has-terminal already-streamed)
-           (or (agent-shell--tool-call-output-text state tool-call-id)
-               (agent-shell--tool-call-content-text (map-elt update 'content))))))
+           (agent-shell--tool-call-content-text (map-elt update 'content)))))
       (unless has-terminal
         (agent-shell--tool-call-clear-output state tool-call-id))))))
 
