@@ -51,15 +51,28 @@
     (when parts
       (mapconcat #'identity parts "\n\n"))))
 (defun agent-shell--tool-call-normalize-output (text)
-  "Normalize tool call output TEXT for streaming."
+  "Normalize tool call output TEXT for streaming.
+Strips backtick fences, formats <persisted-output> wrappers as
+fontified notices, and ensures a trailing newline."
   (when (and text (stringp text))
-    (let* ((lines (split-string text "
-"))
+    (let* ((lines (split-string text "\n"))
            (filtered (seq-remove (lambda (line)
-                                   (string-match-p "\`\s-*```" line))
-                                 lines)))
-      (string-join filtered "
-"))))
+                                   (string-match-p "`\\s-*```" line))
+                                 lines))
+           (result (string-join filtered "\n")))
+      ;; Strip <persisted-output>...</persisted-output> wrapper tags and
+      ;; fontify the content as a notice.
+      (when (string-match-p "<persisted-output>" result)
+        (setq result (replace-regexp-in-string
+                      "</?persisted-output>" "" result))
+        (setq result (string-trim result))
+        (setq result (propertize (concat "\n" result)
+                                 'font-lock-face 'font-lock-comment-face)))
+      ;; Ensure trailing newline so subsequent chunks don't abut.
+      (when (and (not (string-empty-p result))
+                 (not (string-suffix-p "\n" result)))
+        (setq result (concat result "\n")))
+      result)))
 
 (defun agent-shell--tool-call-update-overrides (state update &optional include-content include-diff)
   "Build tool call overrides for UPDATE in STATE.
