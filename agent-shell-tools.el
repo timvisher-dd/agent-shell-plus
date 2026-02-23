@@ -167,12 +167,14 @@ INCLUDE-CONTENT and INCLUDE-DIFF control optional fields."
           (agent-shell--tool-call-append-output-chunk state tool-call-id chunk)
           (agent-shell--append-tool-call-output state tool-call-id chunk))))
      (final
-      (agent-shell--handle-tool-call-update
-       state
-       update
-       (unless has-terminal
-         (or (agent-shell--tool-call-output-text state tool-call-id)
-             (agent-shell--tool-call-content-text (map-elt update 'content)))))
+      (let ((already-streamed (map-nested-elt state `(:tool-calls ,tool-call-id :output-chunks))))
+        (agent-shell--handle-tool-call-update
+         state
+         update
+         ;; Don't re-render output that was already streamed to the buffer.
+         (unless (or has-terminal already-streamed)
+           (or (agent-shell--tool-call-output-text state tool-call-id)
+               (agent-shell--tool-call-content-text (map-elt update 'content))))))
       (unless has-terminal
         (agent-shell--tool-call-clear-output state tool-call-id))))))
 
