@@ -148,11 +148,15 @@ INCLUDE-CONTENT and INCLUDE-DIFF control optional fields."
      (agent-shell--tool-call-update-overrides state update nil nil))
     (cond
      ((and terminal-data (stringp terminal-data))
-      (let* ((chunk (agent-shell--tool-call-normalize-output terminal-data)))
+      (let* ((already-has-output (map-nested-elt state `(:tool-calls ,tool-call-id :output-chunks)))
+             (chunk (agent-shell--tool-call-normalize-output terminal-data)))
         (when (and chunk (not (string-empty-p chunk)))
-          (agent-shell--tool-call-append-output-chunk state tool-call-id chunk)
-          (unless final
-            (agent-shell--append-tool-call-output state tool-call-id chunk))))
+          ;; Skip when meta-response already provided the full output
+          ;; (claude-agent-acp sends the same data in both paths).
+          (unless already-has-output
+            (agent-shell--tool-call-append-output-chunk state tool-call-id chunk)
+            (unless final
+              (agent-shell--append-tool-call-output state tool-call-id chunk)))))
       (when final
         (agent-shell--handle-tool-call-update
          state

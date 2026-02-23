@@ -1478,12 +1478,16 @@ code block content
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 (ert-deftest agent-shell--tool-call-meta-response-stdout-no-duplication-test ()
-  "Meta-response stdout should appear exactly once in the buffer."
+  "Replay exact claude-agent-acp traffic: output must not be duplicated.
+Replays the 4 tool-call notifications captured from a real session:
+  1. tool_call (pending, terminal content)
+  2. tool_call_update (toolResponse.stdout)
+  3. tool_call_update (terminal_output.data)
+  4. tool_call_update (completed, rawOutput)"
   (let* ((buffer (get-buffer-create " *agent-shell-dedup-test*"))
          (agent-shell--state (agent-shell--make-state :buffer buffer))
-         (tool-id "toolu_test_dedup")
-         (stdout-text (mapconcat (lambda (i) (format "line %d" i))
-                                 (number-sequence 0 9) "\n")))
+         (tool-id "toolu_replay_dedup")
+         (stdout-text "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\nline 9"))
     (map-put! agent-shell--state :client 'test-client)
     (map-put! agent-shell--state :request-count 1)
     (with-current-buffer buffer
@@ -1493,47 +1497,81 @@ code block content
         (cl-letf (((symbol-function 'agent-shell--make-diff-info)
                    (lambda (&rest _args) nil)))
           (with-current-buffer buffer
-            ;; Update 1: non-final with toolResponse.stdout (10 lines)
+            ;; Notification 1: tool_call (pending, terminal content)
             (agent-shell--on-notification
              :state agent-shell--state
              :notification `((method . "session/update")
-                             (params . ((update . ((sessionUpdate . "tool_call_update")
-                                                   (toolCallId . ,tool-id)
-                                                   (_meta . ((claudeCode . ((toolResponse
-                                                                             . ((stdout . ,stdout-text)
-                                                                                (stderr . "")))
-                                                                            (toolName . "Bash")))))))))))
-            ;; Update 2: non-final with terminal_output.data (preview: first 3 lines)
+                             (params . ((update
+                                         . ((_meta (claudeCode (toolName . "Bash"))
+                                                   (terminal_info (terminal_id . ,tool-id)))
+                                            (toolCallId . ,tool-id)
+                                            (sessionUpdate . "tool_call")
+                                            (rawInput)
+                                            (status . "pending")
+                                            (title . "Terminal")
+                                            (kind . "execute")
+                                            (content . [((type . "terminal")
+                                                         (terminalId . ,tool-id))])))))))
+            ;; Notification 2: tool_call_update with rawInput + content
             (agent-shell--on-notification
              :state agent-shell--state
              :notification `((method . "session/update")
-                             (params . ((update . ((sessionUpdate . "tool_call_update")
-                                                   (toolCallId . ,tool-id)
-                                                   (_meta . ((terminal_output
-                                                              . ((terminal_id . ,tool-id)
-                                                                 (data . "line 0\nline 1\nline 2\n")))))))))))
-            ;; Update 3: final with status completed
+                             (params . ((update
+                                         . ((_meta (claudeCode (toolName . "Bash")))
+                                            (toolCallId . ,tool-id)
+                                            (sessionUpdate . "tool_call_update")
+                                            (rawInput (command . "for x in {0..9}; do printf 'line %d\\n' \"$x\"; done")
+                                                      (description . "Print lines"))
+                                            (title . "for x in {0..9}; do printf 'line %d\\n' \"$x\"; done")
+                                            (kind . "execute")
+                                            (content . [((type . "terminal")
+                                                         (terminalId . ,tool-id))])))))))
+            ;; Notification 3: tool_call_update with toolResponse.stdout
             (agent-shell--on-notification
              :state agent-shell--state
              :notification `((method . "session/update")
-                             (params . ((update . ((sessionUpdate . "tool_call_update")
-                                                   (toolCallId . ,tool-id)
-                                                   (status . "completed")
-                                                   (_meta . ((claudeCode . ((toolName . "Bash")))
-                                                             (terminal_exit
-                                                              . ((terminal_id . ,tool-id)
-                                                                 (exit_code . 0)))))
-                                                   (content . [((content . ((text . "Done."))))]))))))))
+                             (params . ((update
+                                         . ((_meta (claudeCode (toolResponse (stdout . ,stdout-text)
+                                                                             (stderr . "")
+                                                                             (interrupted)
+                                                                             (isImage)
+                                                                             (noOutputExpected))
+                                                               (toolName . "Bash")))
+                                            (toolCallId . ,tool-id)
+                                            (sessionUpdate . "tool_call_update")))))))
+            ;; Notification 4: tool_call_update with terminal_output.data
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :notification `((method . "session/update")
+                             (params . ((update
+                                         . ((_meta (terminal_output (terminal_id . ,tool-id)
+                                                                    (data . ,stdout-text)))
+                                            (toolCallId . ,tool-id)
+                                            (sessionUpdate . "tool_call_update")))))))
+            ;; Notification 5: tool_call_update completed with rawOutput
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :notification `((method . "session/update")
+                             (params . ((update
+                                         . ((_meta (claudeCode (toolName . "Bash"))
+                                                   (terminal_exit (terminal_id . ,tool-id)
+                                                                  (exit_code . 0)
+                                                                  (signal)))
+                                            (toolCallId . ,tool-id)
+                                            (sessionUpdate . "tool_call_update")
+                                            (status . "completed")
+                                            (rawOutput . ,stdout-text)
+                                            (content . [((type . "terminal")
+                                                         (terminalId . ,tool-id))]))))))))
           (with-current-buffer buffer
             (let* ((buf-text (buffer-substring-no-properties (point-min) (point-max)))
                    (count-line5 (let ((c 0) (s 0))
                                   (while (string-match "line 5" buf-text s)
                                     (setq c (1+ c) s (match-end 0)))
                                   c)))
-              ;; "line 9" should be present (full stdout rendered)
+              ;; "line 9" must be present (output was rendered)
               (should (string-match-p "line 9" buf-text))
-              ;; "line 5" is only in stdout (not in the 3-line preview),
-              ;; so it must appear exactly once.
+              ;; "line 5" must appear exactly once (no duplication)
               (should (= count-line5 1)))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
