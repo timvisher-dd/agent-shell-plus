@@ -1477,5 +1477,25 @@ code block content
             (should (string-match-p "stream chunk" (buffer-string)))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
+(ert-deftest agent-shell--tool-call-normalize-output-trailing-newline-test ()
+  "Normalized output should always end with a newline."
+  (should (string-suffix-p "\n" (agent-shell--tool-call-normalize-output "hello")))
+  (should (string-suffix-p "\n" (agent-shell--tool-call-normalize-output "hello\n")))
+  (should (equal (agent-shell--tool-call-normalize-output "") ""))
+  (should (equal (agent-shell--tool-call-normalize-output nil) nil)))
+
+(ert-deftest agent-shell--tool-call-normalize-output-persisted-output-test ()
+  "Persisted-output tags should be stripped and content fontified."
+  (let ((result (agent-shell--tool-call-normalize-output
+                 "<persisted-output>\nOutput saved to: /tmp/foo.txt\n\nPreview:\nline 0\n</persisted-output>")))
+    ;; Tags stripped
+    (should-not (string-match-p "<persisted-output>" result))
+    (should-not (string-match-p "</persisted-output>" result))
+    ;; Content preserved
+    (should (string-match-p "Output saved to" result))
+    (should (string-match-p "line 0" result))
+    ;; Fontified as comment
+    (should (eq (get-text-property 1 'font-lock-face result) 'font-lock-comment-face))))
+
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here
