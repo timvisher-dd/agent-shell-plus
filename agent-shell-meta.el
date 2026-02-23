@@ -64,6 +64,11 @@ an alist with a `content' string, or a vector of text items."
          (response (and meta
                         (agent-shell--meta-find-tool-response meta))))
     (cond
+     ;; Alist with stdout key: (toolResponse (stdout . "output...") (stderr . "..."))
+     ((and (listp response)
+           (not (vectorp response))
+           (stringp (agent-shell--meta-lookup response 'stdout)))
+      (agent-shell--meta-lookup response 'stdout))
      ;; Alist shape: (toolResponse (mode . "content") (content . "text..."))
      ((and (listp response)
            (not (vectorp response))

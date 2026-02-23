@@ -1431,8 +1431,8 @@ code block content
     (should (string-match-p "offset: 100" entry))))
 
 
-(ert-deftest agent-shell--initialize-request-omits-terminal-output-meta-test ()
-  "Initialize request should not include terminal_output meta capability."
+(ert-deftest agent-shell--initialize-request-includes-terminal-output-meta-test ()
+  "Initialize request should include terminal_output meta capability."
   (let* ((buffer (get-buffer-create " *agent-shell-init-request*"))
          (agent-shell--state (agent-shell--make-state :buffer buffer)))
     (map-put! agent-shell--state :client 'test-client)
@@ -1448,8 +1448,8 @@ code block content
             (agent-shell--initiate-handshake
              :shell-buffer buffer
              :on-initiated (lambda () nil)))
-          (should-not (map-nested-elt captured-request
-                                      '(:params clientCapabilities _meta))))
+          (should (eq t (map-nested-elt captured-request
+                                        '(:params clientCapabilities _meta terminal_output)))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 

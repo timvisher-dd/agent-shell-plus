@@ -2015,7 +2015,8 @@ Must provide ON-INITIATED (lambda ())."
                             (version . ,agent-shell--version))
              :read-text-file-capability agent-shell-text-file-capabilities
              :write-text-file-capability agent-shell-text-file-capabilities
-             :terminal-capability t)
+             :terminal-capability t
+             :meta-capabilities '((terminal_output . t)))
    :on-success (lambda (response)
                  (with-current-buffer shell-buffer
                    (let ((acp-session-capabilities (or (map-elt response 'sessionCapabilities)
