@@ -1357,5 +1357,213 @@ code block content
     (should (string-match-p "filePath: /home/user/test.txt" entry))
     (should (string-match-p "offset: 100" entry))))
 
+(ert-deftest agent-shell--session-column-value-test ()
+  "Test `agent-shell--session-column-value' extracts correct values."
+  (let ((session '((sessionId . "abc-123")
+                   (title . "My session")
+                   (cwd . "/home/user/project")
+                   (updatedAt . "2026-01-19T14:00:00Z"))))
+    ;; directory extracts last path component
+    (should (equal (agent-shell--session-column-value 'directory session)
+                   "project"))
+    ;; title returns session title
+    (should (equal (agent-shell--session-column-value 'title session)
+                   "My session"))
+    ;; session-id returns full sessionId
+    (should (equal (agent-shell--session-column-value 'session-id session)
+                   "abc-123"))
+    ;; date returns formatted date string
+    (should (stringp (agent-shell--session-column-value 'date session)))
+    ;; unknown column returns empty string
+    (should (equal (agent-shell--session-column-value 'unknown session)
+                   ""))))
+
+(ert-deftest agent-shell--session-column-value-missing-fields-test ()
+  "Test `agent-shell--session-column-value' handles missing fields."
+  (let ((session '((sessionId . "s1"))))
+    ;; missing cwd
+    (should (equal (agent-shell--session-column-value 'directory session)
+                   ""))
+    ;; missing title
+    (should (equal (agent-shell--session-column-value 'title session)
+                   "Untitled"))
+    ;; missing sessionId
+    (should (equal (agent-shell--session-column-value 'session-id '())
+                   ""))))
+
+(ert-deftest agent-shell--session-column-face-test ()
+  "Test `agent-shell--session-column-face' returns correct faces."
+  (should (eq (agent-shell--session-column-face 'directory)
+              'font-lock-keyword-face))
+  (should (eq (agent-shell--session-column-face 'date)
+              'font-lock-comment-face))
+  (should (eq (agent-shell--session-column-face 'session-id)
+              'font-lock-constant-face))
+  ;; title and unknown have no face
+  (should-not (agent-shell--session-column-face 'title))
+  (should-not (agent-shell--session-column-face 'unknown)))
+
+(ert-deftest agent-shell--session-choice-label-default-columns-test ()
+  "Test `agent-shell--session-choice-label' with default columns."
+  (let ((agent-shell-session-selection-columns '(directory title date))
+        (session '((sessionId . "s1")
+                   (title . "My session")
+                   (cwd . "/home/user/project")
+                   (updatedAt . "2026-01-19T14:00:00Z")))
+        (max-widths '((directory . 10) (title . 15) (date . 20))))
+    (let ((label (substring-no-properties
+                  (agent-shell--session-choice-label
+                   :acp-session session
+                   :max-widths max-widths))))
+      ;; All three columns present
+      (should (string-match-p "project" label))
+      (should (string-match-p "My session" label))
+      ;; Directory and title are padded, date is not (last column)
+      (should (string-match-p "project   " label))
+      (should (string-match-p "My session      " label)))))
+
+(ert-deftest agent-shell--session-choice-label-with-session-id-test ()
+  "Test `agent-shell--session-choice-label' includes session-id column."
+  (let ((agent-shell-session-selection-columns '(directory title session-id date))
+        (session '((sessionId . "abc-123")
+                   (title . "My session")
+                   (cwd . "/home/user/project")
+                   (updatedAt . "2026-01-19T14:00:00Z")))
+        (max-widths '((directory . 10) (title . 15) (session-id . 10) (date . 20))))
+    (let ((label (substring-no-properties
+                  (agent-shell--session-choice-label
+                   :acp-session session
+                   :max-widths max-widths))))
+      (should (string-match-p "abc-123" label))
+      (should (string-match-p "project" label))
+      (should (string-match-p "My session" label)))))
+
+(ert-deftest agent-shell--session-choice-label-single-column-test ()
+  "Test `agent-shell--session-choice-label' with a single column."
+  (let ((agent-shell-session-selection-columns '(session-id))
+        (session '((sessionId . "abc-123")))
+        (max-widths '((session-id . 10))))
+    (let ((label (substring-no-properties
+                  (agent-shell--session-choice-label
+                   :acp-session session
+                   :max-widths max-widths))))
+      ;; Single column = last column = no padding
+      (should (equal label "abc-123")))))
+
+(ert-deftest agent-shell--session-id-indicator-disabled-test ()
+  "Test `agent-shell--session-id-indicator' returns nil when disabled."
+  (with-temp-buffer
+    (setq-local agent-shell--state
+                `((:session . ((:id . "test-session-id")))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state)))
+      (let ((agent-shell-show-session-id nil))
+        (should-not (agent-shell--session-id-indicator))))))
+
+(ert-deftest agent-shell--session-id-indicator-enabled-test ()
+  "Test `agent-shell--session-id-indicator' returns formatted ID when enabled."
+  (with-temp-buffer
+    (setq-local agent-shell--state
+                `((:session . ((:id . "test-session-id")))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state)))
+      (let ((agent-shell-show-session-id t))
+        (let ((indicator (agent-shell--session-id-indicator)))
+          (should indicator)
+          (should (equal (substring-no-properties indicator)
+                         "[test-session-id]")))))))
+
+(ert-deftest agent-shell--session-id-indicator-no-session-test ()
+  "Test `agent-shell--session-id-indicator' returns nil without active session."
+  (with-temp-buffer
+    (setq-local agent-shell--state
+                `((:session . ((:id . nil)))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state)))
+      (let ((agent-shell-show-session-id t))
+        (should-not (agent-shell--session-id-indicator))))))
+
+(ert-deftest agent-shell-copy-session-id-test ()
+  "Test `agent-shell-copy-session-id' copies ID to kill ring."
+  (with-temp-buffer
+    (setq-local agent-shell--state
+                `((:session . ((:id . "test-session-id")))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'derived-mode-p)
+               (lambda (&rest _) t)))
+      (agent-shell-copy-session-id)
+      (should (equal (current-kill 0) "test-session-id")))))
+
+(ert-deftest agent-shell-copy-session-id-no-session-test ()
+  "Test `agent-shell-copy-session-id' errors without active session."
+  (with-temp-buffer
+    (setq-local agent-shell--state
+                `((:session . ((:id . nil)))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'derived-mode-p)
+               (lambda (&rest _) t)))
+      (should-error (agent-shell-copy-session-id)
+                    :type 'user-error))))
+
+(ert-deftest agent-shell--make-header-model-includes-session-id-test ()
+  "Test `agent-shell--make-header-model' includes :session-id field."
+  (with-temp-buffer
+    (setq-local agent-shell--state
+                `((:agent-config . ((:buffer-name . "Claude Code")
+                                    (:icon-name . nil)))
+                  (:session . ((:id . "test-session-id")
+                               (:model-id . nil)
+                               (:models . nil)
+                               (:mode-id . nil)
+                               (:modes . nil)))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'agent-shell--context-usage-indicator)
+               (lambda () nil))
+              ((symbol-function 'agent-shell--busy-indicator-frame)
+               (lambda () nil)))
+      ;; Enabled
+      (let ((agent-shell-show-session-id t))
+        (let ((model (agent-shell--make-header-model agent-shell--state)))
+          (should (assq :session-id model))
+          (should (equal (substring-no-properties (map-elt model :session-id))
+                         "[test-session-id]"))))
+      ;; Disabled
+      (let ((agent-shell-show-session-id nil))
+        (let ((model (agent-shell--make-header-model agent-shell--state)))
+          (should (assq :session-id model))
+          (should-not (map-elt model :session-id)))))))
+
+(ert-deftest agent-shell--make-header-text-includes-session-id-test ()
+  "Test `agent-shell--make-header' text mode includes session ID."
+  (with-temp-buffer
+    (setq-local agent-shell--state
+                `((:agent-config . ((:buffer-name . "Claude Code")
+                                    (:icon-name . nil)))
+                  (:session . ((:id . "test-session-id")
+                               (:model-id . nil)
+                               (:models . nil)
+                               (:mode-id . nil)
+                               (:modes . nil)))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'agent-shell--context-usage-indicator)
+               (lambda () nil))
+              ((symbol-function 'agent-shell--busy-indicator-frame)
+               (lambda () nil)))
+      (let ((agent-shell-header-style 'text)
+            (agent-shell-show-session-id t))
+        (let ((header (agent-shell--make-header agent-shell--state)))
+          (should (string-match-p "test-session-id"
+                                  (substring-no-properties header)))))
+      ;; Disabled: session ID absent
+      (let ((agent-shell-header-style 'text)
+            (agent-shell-show-session-id nil))
+        (let ((header (agent-shell--make-header agent-shell--state)))
+          (should-not (string-match-p "test-session-id"
+                                      (substring-no-properties header))))))))
+
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here
