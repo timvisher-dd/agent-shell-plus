@@ -84,6 +84,11 @@
 ;; buffer-local vars. Make snapshot permanent-local.
 (put 'agent-shell-viewport--compose-snapshot 'permanent-local t)
 
+(defvar-local agent-shell-viewport--ring-index nil
+  "Current index into `comint-input-ring' for history navigation.")
+;; Survives mode switches (edit <-> view) which clear buffer-local vars.
+(put 'agent-shell-viewport--ring-index 'permanent-local t)
+
 (cl-defun agent-shell-viewport--show-buffer (&key append override submit no-focus shell-buffer)
   "Show a viewport compose buffer for the agent shell.
 
@@ -184,6 +189,7 @@ Returns an alist with insertion details or nil otherwise:
                     (map-nested-elt agent-shell--state '(:session :id)))))
     (user-error "Session not ready... please wait"))
   (setq agent-shell-viewport--compose-snapshot nil)
+  (setq agent-shell-viewport--ring-index nil)
   (if agent-shell-prefer-viewport-interaction
       (agent-shell-viewport-compose-send-and-wait-for-response)
     (agent-shell-viewport-compose-send-and-kill)))
@@ -369,6 +375,80 @@ Optionally set its PROMPT and RESPONSE."
             (agent-shell-viewport-view-last)
           (agent-shell-other-buffer)
           (kill-buffer viewport-buffer))))))
+
+(defun agent-shell-viewport-previous-history ()
+  "Insert previous prompt from history into compose buffer."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-viewport-edit-mode)
+    (user-error "Not in a shell viewport buffer"))
+  (let* ((ring (with-current-buffer (agent-shell-viewport--shell-buffer)
+                 (seq-filter
+                  (lambda (item)
+                    (not (string-empty-p item)))
+                  (ring-elements comint-input-ring))))
+         (next-index (unless (seq-empty-p ring)
+                       (if agent-shell-viewport--ring-index
+                           (1+ agent-shell-viewport--ring-index)
+                         0))))
+    ;; Save in-progress compose text before first history navigation.
+    (when (and (not agent-shell-viewport--ring-index)
+               (not agent-shell-viewport--compose-snapshot))
+      (setq agent-shell-viewport--compose-snapshot
+            `((:content . ,(buffer-string))
+              (:location . ,(point)))))
+    (cond
+     ;; Empty ring.
+     ((not next-index)
+      (setq agent-shell-viewport--ring-index nil))
+     ;; Already at oldest entry, clamp.
+     ((>= next-index (seq-length ring))
+      (setq agent-shell-viewport--ring-index (1- (seq-length ring))))
+     (t
+      (setq agent-shell-viewport--ring-index next-index)))
+    (when agent-shell-viewport--ring-index
+      (agent-shell-viewport--initialize
+       :prompt (seq-elt ring agent-shell-viewport--ring-index)))))
+
+(defun agent-shell-viewport-next-history ()
+  "Insert next prompt from history into compose buffer."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-viewport-edit-mode)
+    (user-error "Not in a shell viewport buffer"))
+  (unless agent-shell-viewport--ring-index
+    (user-error "No more history"))
+  (let* ((ring (with-current-buffer (agent-shell-viewport--shell-buffer)
+                 (seq-filter
+                  (lambda (item)
+                    (not (string-empty-p item)))
+                  (ring-elements comint-input-ring))))
+         (next-index (1- agent-shell-viewport--ring-index)))
+    (if (< next-index 0)
+        ;; Past newest entry, restore in-progress compose text.
+        (let ((snapshot agent-shell-viewport--compose-snapshot))
+          (setq agent-shell-viewport--ring-index nil)
+          (agent-shell-viewport--initialize)
+          (when snapshot
+            (insert (map-elt snapshot :content))
+            (goto-char (map-elt snapshot :location))
+            (setq agent-shell-viewport--compose-snapshot nil)))
+      ;; Show older entry.
+      (setq agent-shell-viewport--ring-index next-index)
+      (agent-shell-viewport--initialize
+       :prompt (seq-elt ring next-index)))))
+
+(defun agent-shell-viewport-search-history ()
+  "Search prompt history, select, and insert into compose buffer."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-viewport-edit-mode)
+    (user-error "Not in a shell viewport buffer"))
+  (insert (with-current-buffer (agent-shell-viewport--shell-buffer)
+            (completing-read
+             "History: "
+             (delete-dups
+              (seq-filter
+               (lambda (item)
+                 (not (string-empty-p item)))
+               (ring-elements comint-input-ring))) nil t))))
 
 (defun agent-shell-viewport-compose-peek-last ()
   "Save compose buffer snapshot and peek at the last interaction."
@@ -814,6 +894,9 @@ VIEWPORT-BUFFER is the viewport buffer to check."
     (define-key map (kbd "C-c C-m") #'agent-shell-viewport-set-session-mode)
     (define-key map (kbd "C-c C-v") #'agent-shell-viewport-set-session-model)
     (define-key map (kbd "C-c C-o") #'agent-shell-other-buffer)
+    (define-key map (kbd "M-p") #'agent-shell-viewport-previous-history)
+    (define-key map (kbd "M-n") #'agent-shell-viewport-next-history)
+    (define-key map (kbd "M-r") #'agent-shell-viewport-search-history)
     (define-key map [remap yank] #'agent-shell-yank-dwim)
     map)
   "Keymap for `agent-shell-viewport-edit-mode'.")
