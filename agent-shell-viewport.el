@@ -48,6 +48,7 @@
 (declare-function agent-shell--shell-buffer "agent-shell")
 (declare-function agent-shell--start "agent-shell")
 (declare-function agent-shell--state "agent-shell")
+(declare-function agent-shell--filter-buffer-substring "agent-shell")
 (declare-function agent-shell-buffers "agent-shell")
 (declare-function agent-shell-copy-session-id "agent-shell")
 (declare-function agent-shell-cycle-session-mode "agent-shell")
