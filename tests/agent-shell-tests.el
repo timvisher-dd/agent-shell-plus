@@ -1924,5 +1924,71 @@ code block content
         (should-not responded)
         (should (equal (map-elt state :last-entry-type) "session/request_permission"))))))
 
+(ert-deftest agent-shell-alert--osc-payload-test ()
+  "Test OSC payload generation for each protocol."
+  (let ((agent-shell-alert-osc-protocol 'osc-9))
+    (should (equal (agent-shell-alert--osc-payload "Title" "Body")
+                   "\e]9;Title: Body\a")))
+  (let ((agent-shell-alert-osc-protocol 'osc-99))
+    (should (equal (agent-shell-alert--osc-payload "Title" "Body")
+                   "\e]99;i=1:d=0;Title: Body\e\\")))
+  (let ((agent-shell-alert-osc-protocol 'osc-777))
+    (should (equal (agent-shell-alert--osc-payload "Title" "Body")
+                   "\e]777;notify;Title;Body\e\\"))))
+
+(ert-deftest agent-shell-alert--dcs-wrap-tmux-test ()
+  "Test DCS wrapping for tmux."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (var &optional _frame)
+               (pcase var
+                 ("TMUX" "/tmp/tmux-501/default,12345,0")
+                 (_ nil)))))
+    (should (equal (agent-shell-alert--dcs-wrap "payload")
+                   "\ePtmux;\epayload\e\\"))))
+
+(ert-deftest agent-shell-alert--dcs-wrap-screen-test ()
+  "Test DCS wrapping for GNU screen."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (var &optional _frame)
+               (pcase var
+                 ("TMUX" nil)
+                 ("TERM" "screen-256color")
+                 (_ nil)))))
+    (should (equal (agent-shell-alert--dcs-wrap "payload")
+                   "\ePpayload\e\\"))))
+
+(ert-deftest agent-shell-alert--dcs-wrap-bare-terminal-test ()
+  "Test no DCS wrapping in bare terminal."
+  (cl-letf (((symbol-function 'getenv)
+             (lambda (_var &optional _frame) nil)))
+    (should (equal (agent-shell-alert--dcs-wrap "payload")
+                   "payload"))))
+
+(ert-deftest agent-shell-alert-notify-dispatches-to-mac-when-available-test ()
+  "Test that notify dispatches to native macOS when module is loaded."
+  (let ((notified nil))
+    (cl-letf (((symbol-function 'agent-shell-alert--mac-available-p)
+               (lambda () t))
+              ((symbol-function 'agent-shell-alert-mac-notify)
+               (lambda (title body)
+                 (setq notified (list title body)))))
+      (agent-shell-alert-notify "Test" "Hello")
+      (should (equal notified '("Test" "Hello"))))))
+
+(ert-deftest agent-shell-alert-notify-falls-back-to-osc-in-tui-test ()
+  "Test that notify falls back to OSC in terminal mode."
+  (let ((sent nil))
+    (cl-letf (((symbol-function 'agent-shell-alert--mac-available-p)
+               (lambda () nil))
+              ((symbol-function 'display-graphic-p)
+               (lambda (&rest _) nil))
+              ((symbol-function 'getenv)
+               (lambda (_var &optional _frame) nil))
+              ((symbol-function 'send-string-to-terminal)
+               (lambda (str) (setq sent str))))
+      (let ((agent-shell-alert-osc-protocol 'osc-9))
+        (agent-shell-alert-notify "T" "B")
+        (should (equal sent "\e]9;T: B\a"))))))
+
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here
