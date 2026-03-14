@@ -154,7 +154,7 @@ Example -- auto-approve reads:
             t)))")
 
 (defun agent-shell-permission-allow-always (permission)
-  "Auto-approve all permission requests.
+  "Auto-approve all PERMISSION requests.
 
 Intended for use with `agent-shell-permission-responder-function'.
 
@@ -1003,10 +1003,10 @@ When FORCE is non-nil, skip confirmation prompt."
       :shell-buffer (map-elt shell :buffer)))))
 
 (defun agent-shell--filter-buffer-substring (start end &optional delete)
-  "Return the buffer substring between BEG and END, after filtering.
+  "Return the buffer substring between START and END, after filtering.
 Strip the text properties `line-prefix' and `wrap-prefix' from the
-copied substring.  If DELETE is non-nil, delete the text between BEG and
-END from the buffer."
+copied substring.  If DELETE is non-nil, delete the text between START
+and END from the buffer."
   (let ((text (if delete
                   (prog1 (buffer-substring start end)
                     (delete-region start end))
@@ -2117,7 +2117,7 @@ For example:
                     (agent-shell-cwd)))
 
 (defun agent-shell--dot-subdir (subdir)
-  "Return path to SUBDIR for agent-shell data, creating it if needed.
+  "Return path to SUBDIR for `agent-shell' data, creating it if needed.
 Calls `agent-shell-dot-subdir-function' to resolve the path.
 When the directory is first created inside a git repo and
 .agent-shell/ is not yet ignored, automatically add it to .gitignore.
@@ -2127,7 +2127,7 @@ removed from .gitignore it will not be re-added."
     (error "agent-shell-dot-subdir-function must be set to a function"))
   (let ((dir (funcall agent-shell-dot-subdir-function subdir)))
     (unless (and (stringp dir) (not (string-empty-p (string-trim dir))))
-      (error "Failed to resolve agent-shell data directory (subdir: %s). Resulting directory is not a non-empty string (dir: %s)" subdir dir))
+      (error "Failed to resolve agent-shell data directory (subdir: %s).  Resulting directory is not a non-empty string (dir: %s)" subdir dir))
     (unless (file-directory-p dir)
       (make-directory dir t)
       (agent-shell--ensure-gitignore (agent-shell-cwd)))
@@ -2176,7 +2176,7 @@ DESTINATION-DIR is required and must be provided."
 Returns the full path to the saved image file on success.
 When NO-ERROR is non-nil, return nil instead of signaling errors.
 
-Needs external utilities. See `agent-shell-clipboard-image-handlers'
+Needs external utilities.  See `agent-shell-clipboard-image-handlers'
 for details."
   (unless destination-dir
     (error "Destination-dir is required"))
@@ -4730,7 +4730,7 @@ When PICK-SHELL is non-nil, prompt for which shell buffer to use."
 (defun agent-shell-send-clipboard-image (&optional pick-shell)
   "Paste clipboard image and insert it into `agent-shell'.
 
-Needs external utilities. See `agent-shell-clipboard-image-handlers'
+Needs external utilities.  See `agent-shell-clipboard-image-handlers'
 for details.
 
 The image is saved to .agent-shell/screenshots in the project root.
@@ -4763,7 +4763,7 @@ When PICK-SHELL is non-nil, prompt for which shell buffer to use."
 If the clipboard contains an image, save it and insert as file context.
 Otherwise, invoke `yank' with ARG as usual.
 
-Needs external utilities. See `agent-shell-clipboard-image-handlers'
+Needs external utilities.  See `agent-shell-clipboard-image-handlers'
 for details."
   (interactive "*P")
   (let* ((screenshots-dir (agent-shell--dot-subdir "screenshots"))
