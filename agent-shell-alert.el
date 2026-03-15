@@ -36,7 +36,17 @@
 
 ;;; Code:
 
+(require 'seq)
+
 (declare-function agent-shell-alert-mac-notify "agent-shell-alert-mac")
+
+(defvar agent-shell-alert--source-dir
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Directory containing agent-shell-alert source files.
+Captured at load time so it remains correct after loading.")
+
+(defvar agent-shell-alert--mac-authorized nil
+  "Non-nil when native macOS notifications are authorized and working.")
 
 (defvar agent-shell-alert--osascript-warned nil
   "Non-nil after the osascript fallback warning has been shown.")
@@ -162,19 +172,20 @@ TITLE and BODY are the notification title and message.
 set -g allow-passthrough on")))
   (call-process "osascript" nil 0 nil
                 "-e"
-                (format "display notification %S with title %S"
+                (format "tell application \"Emacs\" to \
+display notification %S with title %S"
                         body title)))
 
 (defun agent-shell-alert--mac-available-p ()
-  "Return non-nil if the macOS native notification module is loaded."
+  "Return non-nil if native macOS notifications are authorized and working."
   (and (eq system-type 'darwin)
        (display-graphic-p)
-       (fboundp 'agent-shell-alert-mac-notify)))
+       (fboundp 'agent-shell-alert-mac-notify)
+       agent-shell-alert--mac-authorized))
 
 (defun agent-shell-alert--source-directory ()
   "Return the directory containing agent-shell-alert source files."
-  (file-name-directory
-   (or load-file-name buffer-file-name default-directory)))
+  agent-shell-alert--source-dir)
 
 (defun agent-shell-alert--module-path ()
   "Return the expected path of the compiled native module."
@@ -188,11 +199,15 @@ Returns non-nil on success."
   (let* ((source (expand-file-name "agent-shell-alert-mac.m"
                                    (agent-shell-alert--source-directory)))
          (output (agent-shell-alert--module-path))
-         (include-dir (expand-file-name
-                       "include"
-                       (file-name-directory
-                        (directory-file-name invocation-directory)))))
-    (when (file-exists-p source)
+         (emacs-dir (file-name-directory
+                     (directory-file-name invocation-directory)))
+         (include-dir
+          (seq-find
+           (lambda (d) (file-exists-p (expand-file-name "emacs-module.h" d)))
+           (list (expand-file-name "include" emacs-dir)
+                 (expand-file-name "Resources/include" emacs-dir)
+                 (expand-file-name "../include" invocation-directory)))))
+    (when (and (file-exists-p source) include-dir)
       (zerop
        (call-process "cc" nil nil nil
                      "-Wall" "-O2" "-fPIC"
@@ -213,11 +228,18 @@ Returns non-nil on success."
       (agent-shell-alert--compile-mac-module))
     (ignore-errors
       (module-load (agent-shell-alert--module-path)))
-    (unless (fboundp 'agent-shell-alert-mac-notify)
+    (if (fboundp 'agent-shell-alert-mac-notify)
+        (condition-case err
+            (when (agent-shell-alert-mac-request-authorization)
+              (setq agent-shell-alert--mac-authorized t))
+          (error
+           (message "agent-shell-alert: native notifications unavailable \
+(%s); falling back to osascript"
+                    (error-message-string err))))
       (message "agent-shell-alert: native module unavailable; \
 install Xcode command line tools (`xcode-select --install') \
 for macOS desktop notifications")))
-  (fboundp 'agent-shell-alert-mac-notify))
+  agent-shell-alert--mac-authorized)
 
 (defun agent-shell-alert-notify (title body)
   "Send a desktop notification with TITLE and BODY.
@@ -233,12 +255,18 @@ passthrough is not enabled.
   (cond
    ((agent-shell-alert--mac-available-p)
     (agent-shell-alert-mac-notify title body))
+   ((and (display-graphic-p)
+         (eq system-type 'darwin)
+         (fboundp 'agent-shell-alert-mac-applescript-notify))
+    (agent-shell-alert-mac-applescript-notify title body))
    ((not (display-graphic-p))
     (if-let ((payload (agent-shell-alert--osc-payload title body))
              (wrapped (agent-shell-alert--tmux-passthrough payload)))
         (send-string-to-terminal wrapped)
       (when (eq system-type 'darwin)
-        (agent-shell-alert--osascript-notify title body))))))
+        (agent-shell-alert--osascript-notify title body))))
+   ((eq system-type 'darwin)
+    (agent-shell-alert--osascript-notify title body))))
 
 (agent-shell-alert--try-load-mac-module)
 

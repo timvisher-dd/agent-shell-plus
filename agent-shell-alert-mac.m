@@ -51,10 +51,20 @@ signal_error(emacs_env *env, const char *msg)
   env->non_local_exit_signal(env, sym, data);
 }
 
+/* Pump the NSRunLoop until done becomes YES or timeout seconds elapse. */
+static void
+run_loop_until(BOOL *done, NSTimeInterval timeout)
+{
+  NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:timeout];
+  while (!*done && [[NSDate date] compare:limit] == NSOrderedAscending)
+    [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                             beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+}
+
 /* --- Notification operations --- */
 
 /* (agent-shell-alert-mac-notify TITLE BODY)
- * Posts a macOS notification.  Returns t. */
+ * Posts a macOS notification.  Returns t on success, nil on failure. */
 static emacs_value
 Fagent_shell_alert_mac_notify(emacs_env *env, ptrdiff_t nargs,
                               emacs_value *args, void *data)
@@ -101,18 +111,35 @@ Fagent_shell_alert_mac_notify(emacs_env *env, ptrdiff_t nargs,
                                            content:content
                                            trigger:nil];
 
+  __block BOOL done = NO;
+  __block NSString *err_desc = nil;
+
   [center addNotificationRequest:request
            withCompletionHandler:^(NSError *error) {
-             if (error) {
-               NSLog(@"agent-shell-alert-mac: notification error: %@", error);
-             }
+             if (error)
+               err_desc = [[error localizedDescription] copy];
+             done = YES;
            }];
+
+  run_loop_until(&done, 10.0);
+
+  if (err_desc) {
+    char msg[512];
+    snprintf(msg, sizeof(msg),
+             "agent-shell-alert-mac-notify: %s", [err_desc UTF8String]);
+    signal_error(env, msg);
+    return env->intern(env, "nil");
+  }
+  if (!done) {
+    signal_error(env, "agent-shell-alert-mac-notify: timed out");
+    return env->intern(env, "nil");
+  }
 
   return env->intern(env, "t");
 }
 
 /* (agent-shell-alert-mac-request-authorization)
- * Requests notification authorization.  Returns t. */
+ * Requests notification authorization.  Returns t if granted. */
 static emacs_value
 Fagent_shell_alert_mac_request_authorization(emacs_env *env, ptrdiff_t nargs,
                                              emacs_value *args, void *data)
@@ -132,18 +159,86 @@ Fagent_shell_alert_mac_request_authorization(emacs_env *env, ptrdiff_t nargs,
     return env->intern(env, "nil");
   }
 
+  __block BOOL done = NO;
+  __block BOOL granted = NO;
+  __block NSString *err_desc = nil;
+
   [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert |
                                            UNAuthorizationOptionSound)
-                        completionHandler:^(BOOL granted, NSError *error) {
-                          if (error) {
-                            NSLog(@"agent-shell-alert-mac: authorization "
-                                  @"error: %@",
-                                  error);
-                          } else if (!granted) {
-                            NSLog(@"agent-shell-alert-mac: authorization "
-                                  @"denied by user");
-                          }
+                        completionHandler:^(BOOL g, NSError *error) {
+                          granted = g;
+                          if (error)
+                            err_desc = [[error localizedDescription] copy];
+                          done = YES;
                         }];
+
+  run_loop_until(&done, 30.0);
+
+  if (err_desc) {
+    char msg[512];
+    snprintf(msg, sizeof(msg),
+             "agent-shell-alert-mac-request-authorization: %s",
+             [err_desc UTF8String]);
+    signal_error(env, msg);
+    return env->intern(env, "nil");
+  }
+  if (!done) {
+    signal_error(env,
+                 "agent-shell-alert-mac-request-authorization: timed out");
+    return env->intern(env, "nil");
+  }
+
+  return env->intern(env, granted ? "t" : "nil");
+}
+
+/* (agent-shell-alert-mac-applescript-notify TITLE BODY)
+ * Posts a notification via NSAppleScript from within Emacs's process,
+ * so macOS attributes it to Emacs (icon, click-to-activate).
+ * Does not require UNUserNotificationCenter entitlements. */
+static emacs_value
+Fagent_shell_alert_mac_applescript_notify(emacs_env *env, ptrdiff_t nargs,
+                                          emacs_value *args, void *data)
+{
+  (void)nargs;
+  (void)data;
+
+  char *title_c = extract_string(env, args[0]);
+  if (!title_c)
+    return env->intern(env, "nil");
+  char *body_c = extract_string(env, args[1]);
+  if (!body_c) {
+    free(title_c);
+    return env->intern(env, "nil");
+  }
+
+  NSString *script =
+      [NSString stringWithFormat:
+                    @"display notification %@ with title %@",
+                    [NSString stringWithFormat:@"\"%@\"",
+                              [[NSString stringWithUTF8String:body_c]
+                                  stringByReplacingOccurrencesOfString:@"\""
+                                                           withString:@"\\\""]],
+                    [NSString stringWithFormat:@"\"%@\"",
+                              [[NSString stringWithUTF8String:title_c]
+                                  stringByReplacingOccurrencesOfString:@"\""
+                                                           withString:@"\\\""]]];
+  free(title_c);
+  free(body_c);
+
+  NSDictionary *error = nil;
+  NSAppleScript *as = [[NSAppleScript alloc] initWithSource:script];
+  [as executeAndReturnError:&error];
+
+  if (error) {
+    NSString *desc = error[NSAppleScriptErrorMessage]
+                         ?: @"unknown AppleScript error";
+    char msg[512];
+    snprintf(msg, sizeof(msg),
+             "agent-shell-alert-mac-applescript-notify: %s",
+             [desc UTF8String]);
+    signal_error(env, msg);
+    return env->intern(env, "nil");
+  }
 
   return env->intern(env, "t");
 }
@@ -182,7 +277,17 @@ emacs_module_init(struct emacs_runtime *runtime)
           "Request macOS notification authorization.\n\n"
           "(agent-shell-alert-mac-request-authorization)\n\n"
           "Call once to prompt the user for notification permission.\n"
-          "Returns t.",
+          "Returns t if granted, nil otherwise.",
+          NULL));
+
+  bind_function(
+      env, "agent-shell-alert-mac-applescript-notify",
+      env->make_function(
+          env, 2, 2, Fagent_shell_alert_mac_applescript_notify,
+          "Post a notification via AppleScript from Emacs's process.\n\n"
+          "(agent-shell-alert-mac-applescript-notify TITLE BODY)\n\n"
+          "Uses NSAppleScript so the notification is attributed to Emacs.\n"
+          "Does not require UNUserNotificationCenter entitlements.",
           NULL));
 
   emacs_value feature = env->intern(env, "agent-shell-alert-mac");
