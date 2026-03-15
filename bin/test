@@ -12,7 +12,7 @@ shell_maker_root=${shell_maker_root:-${root}/../../shell-maker/main}
 
 if ! [[ -r ${acp_root}/acp.el ]]
 then
-  echo "Set shell_maker_root to your shell-maker checkout (e.g. ~/git/xenodium/shell-maker/main)" >&2
+  echo "Set acp_root to your acp.el checkout (e.g. ~/git/timvisher-dd/acp.el-plus/main)" >&2
   die=1
 fi
 
@@ -77,3 +77,26 @@ emacs -Q --batch \
   -L "${tests_dir}" \
   "${test_args[@]}" \
   -f ert-run-tests-batch-and-exit
+
+# --- README update check (mirrors CI readme-updated job) ---
+# Compare against main (or merge-base) to see if code changed without
+# a corresponding README.org update.
+base=$(git -C "${root}" merge-base HEAD main 2>/dev/null) || true
+if [[ -n ${base} ]]
+then
+  changed_files=$(git -C "${root}" diff --name-only "${base}" HEAD)
+  has_code_changes=false
+  for f in ${changed_files}; do
+    case "${f}" in
+      *.el|tests/*) has_code_changes=true; break ;;
+    esac
+  done
+
+  if "${has_code_changes}"; then
+    if ! echo "${changed_files}" | grep -q '^README\.org$'; then
+      echo "ERROR: Code or test files changed but README.org was not updated." >&2
+      echo "Please update the soft-fork features list in README.org." >&2
+      exit 1
+    fi
+  fi
+fi
