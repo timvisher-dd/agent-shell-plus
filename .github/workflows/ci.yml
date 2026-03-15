@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: timvisher-dd/acp.el-plus
+          path: deps/acp.el
+
+      - uses: actions/checkout@v4
+        with:
+          repository: xenodium/shell-maker
+          path: deps/shell-maker
+
+      - uses: purcell/setup-emacs@master
+        with:
+          version: 29.4
+
+      - name: Remove stale .elc files
+        run: find . deps -follow -name '*.elc' -print0 | xargs -0 rm -f
+
+      - name: Byte-compile
+        run: |
+          compile_files=()
+          for f in *.el; do
+            case "$f" in x.*|y.*|z.*) ;; *) compile_files+=("$f") ;; esac
+          done
+          emacs -Q --batch \
+            -L . -L deps/acp.el -L deps/shell-maker \
+            -f batch-byte-compile \
+            "${compile_files[@]}"
+
+      - name: Run ERT tests
+        run: |
+          test_args=()
+          for f in tests/*-tests.el; do
+            test_args+=(-l "$f")
+          done
+          emacs -Q --batch \
+            -L . -L deps/acp.el -L deps/shell-maker -L tests \
+            "${test_args[@]}" \
+            -f ert-run-tests-batch-and-exit

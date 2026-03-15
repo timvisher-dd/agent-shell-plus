@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Runs the same checks as CI by parsing .github/workflows/ci.yml directly.
+# If CI steps change, this script automatically picks them up.
+#
+# Local adaptations:
+# - Dependencies (acp.el, shell-maker) are symlinked into deps/ from
+#   local worktree checkouts instead of being cloned by GitHub Actions.
+#   Override locations with acp_root and shell_maker_root env vars.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+ci_yaml=".github/workflows/ci.yml"
+
+if ! command -v yq &>/dev/null; then
+  echo "error: yq is required (brew install yq)" >&2
+  exit 1
+fi
+
+# Resolve local dependency paths — CI checks these out via actions/checkout
+acp_root=${acp_root:-../../acp.el/main}
+shell_maker_root=${shell_maker_root:-../../shell-maker/main}
+
+die=0
+if ! [[ -r ${acp_root}/acp.el ]]; then
+  echo "error: acp.el not found at ${acp_root}" >&2
+  echo "Set acp_root to your acp.el checkout" >&2
+  die=1
+fi
+
+if ! [[ -r ${shell_maker_root}/shell-maker.el ]]; then
+  echo "error: shell-maker.el not found at ${shell_maker_root}" >&2
+  echo "Set shell_maker_root to your shell-maker checkout" >&2
+  die=1
+fi
+
+if (( 0 < die )); then
+  exit 1
+fi
+
+# Create deps/ symlinks to match CI layout
+mkdir -p deps
+ln -sfn "$(cd "${acp_root}" && pwd)" deps/acp.el
+ln -sfn "$(cd "${shell_maker_root}" && pwd)" deps/shell-maker
+
+# Extract and run CI steps
+step_count=$(yq '[.jobs.test.steps[] | select(.run)] | length' "$ci_yaml")
+
+for (( i = 0; i < step_count; i++ )); do
+  name=$(yq "[.jobs.test.steps[] | select(.run)].[${i}].name" "$ci_yaml")
+  cmd=$(yq "[.jobs.test.steps[] | select(.run)].[${i}].run" "$ci_yaml")
+
+  echo "=== ${name} ==="
+  eval "$cmd"
+  echo ""
+done
+
+echo "=== All CI checks passed ==="
