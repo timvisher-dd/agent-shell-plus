@@ -46,7 +46,7 @@ context window usage, and cost information after each agent response."
   :type 'boolean
   :group 'agent-shell)
 
-(defcustom agent-shell-show-context-usage-indicator t
+(defcustom agent-shell-show-context-usage-indicator 'detailed
   "Whether and how to show the context usage indicator.
 
 When set to t, displays a vertical bar character indicating
