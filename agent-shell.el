@@ -5206,11 +5206,17 @@ Returns non-nil if a permission button was found, nil otherwise."
                       (goto-char (point-max))
                       (agent-shell-previous-permission-button))))
     (deactivate-mark)
-    (goto-char found)
-    (beginning-of-line)
-    (agent-shell-next-permission-button)
-    (when-let ((window (get-buffer-window (current-buffer))))
-      (set-window-point window (point)))
+    ;; Unless buffer is in window, cursor is not moved.
+    ;; Make sure the cursor is moved even if buffer is in background.
+    (when-let ((window (or (get-buffer-window (current-buffer))
+                           (seq-first (window-list)))))
+      (save-window-excursion
+        (set-window-buffer window (current-buffer))
+        (with-selected-window window
+          (goto-char found)
+          (beginning-of-line)
+          (agent-shell-next-permission-button)
+          (set-window-point window (point)))))
     t))
 
 (defun agent-shell-next-permission-button ()
