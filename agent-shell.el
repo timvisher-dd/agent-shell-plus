@@ -4,10 +4,10 @@
 
 ;; Author: Alvaro Ramirez https://xenodium.com
 ;; URL: https://github.com/xenodium/agent-shell
-;; Version: 0.49.1
-;; Package-Requires: ((emacs "29.1") (shell-maker "0.89.2") (acp "0.11.1"))
+;; Version: 0.50.1
+;; Package-Requires: ((emacs "29.1") (shell-maker "0.90.1") (acp "0.11.1"))
 
-(defconst agent-shell--version "0.49.1")
+(defconst agent-shell--version "0.50.1")
 
 ;; This package is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -47,7 +47,7 @@
 (require 'json)
 (require 'map)
 (unless (require 'markdown-overlays nil 'noerror)
-  (error "Please update 'shell-maker' to v0.89.2 or newer"))
+  (error "Please update 'shell-maker' to v0.90.1 or newer"))
 (require 'agent-shell-anthropic)
 (require 'agent-shell-auggie)
 (require 'agent-shell-cline)
@@ -1552,7 +1552,7 @@ COMMAND, when present, may be a shell command string or an argv vector."
            (if (not (agent-shell--active-requests-p state))
                (message "%s %s (stale, consider reporting to ACP agent): %s"
                         agent-shell-thought-process-icon
-                        (propertize "Thought process" 'face font-lock-doc-markup-face)
+                        (propertize "Thinking" 'face font-lock-doc-markup-face)
                         (truncate-string-to-width (map-nested-elt acp-notification '(params update content text)) 100))
              (unless (equal (map-elt state :last-entry-type)
                             "agent_thought_chunk")
@@ -1571,7 +1571,7 @@ COMMAND, when present, may be a shell command string or an argv vector."
               :label-left  (concat
                             agent-shell-thought-process-icon
                             " "
-                            (propertize "Thought process" 'font-lock-face font-lock-doc-markup-face))
+                            (propertize "Thinking" 'font-lock-face font-lock-doc-markup-face))
               :body (map-nested-elt acp-notification '(params update content text))
               :append (equal (map-elt state :last-entry-type)
                              "agent_thought_chunk")
@@ -2055,16 +2055,17 @@ https://agentclientprotocol.com/protocol/schema#param-stop-reason"
 
 (defun agent-shell--format-available-commands (commands)
   "Format COMMANDS for shell rendering."
-  (agent-shell--align-alist
-   :data commands
-   :columns (list
-             (lambda (cmd)
-               (propertize (concat "/" (map-elt cmd 'name))
-                           'font-lock-face 'font-lock-function-name-face))
-             (lambda (cmd)
-               (propertize (map-elt cmd 'description)
-                           'font-lock-face 'font-lock-comment-face)))
-   :joiner "\n"))
+  (string-join
+   (seq-map
+    (lambda (cmd)
+      (concat
+       (propertize (concat "/" (map-elt cmd 'name))
+                   'font-lock-face 'font-lock-function-name-face)
+       "\n"
+       (propertize (map-elt cmd 'description)
+                   'font-lock-face 'font-lock-comment-face)))
+    commands)
+   "\n\n"))
 
 (defun agent-shell--format-agent-capabilities (capabilities)
   "Format agent CAPABILITIES for shell rendering.
@@ -2653,8 +2654,8 @@ SESSION-STRATEGY overrides `agent-shell-session-strategy' buffer-locally.
 SESSION-ID resumes an existing session by its id string.
 FORK-SESSION-ID forks an existing session by its id string.
 OUTGOING-REQUEST-DECORATOR is passed through to `acp-make-client'."
-  (unless (version<= "0.89.2" shell-maker-version)
-    (error "Please update shell-maker to version 0.89.2 or newer"))
+  (unless (version<= "0.90.1" shell-maker-version)
+    (error "Please update shell-maker to version 0.90.1 or newer"))
   (unless (version<= "0.11.1" acp-package-version)
     (error "Please update acp.el to version 0.11.1 or newer"))
   (when (boundp 'agent-shell--transcript-file-path-function)
@@ -6328,43 +6329,44 @@ Optionally, get notified of completion with ON-SUCCESS function."
                    (message "Failed to change model: %s" acp-error)))))
 
 (defun agent-shell--format-available-modes (modes)
-  "Format MODES for shell rendering.
-If CURRENT-MODE-ID is provided, append \"(current)\" to the matching mode name."
-  (agent-shell--align-alist
-   :data modes
-   :columns (list
-             (lambda (mode)
-               (when (map-elt mode :name)
-                 (propertize (format "%s (%s)"
-                                     (map-elt mode :name)
-                                     (map-elt mode :id))
-                             'font-lock-face 'font-lock-function-name-face)))
-             (lambda (mode)
-               (when (map-elt mode :description)
-                 (propertize (map-elt mode :description)
-                             'font-lock-face 'font-lock-comment-face))))
-   :joiner "\n"))
+  "Format MODES for shell rendering."
+  (string-join
+   (seq-map
+    (lambda (mode)
+      (let ((name (when (map-elt mode :name)
+                    (propertize (format "%s (%s)"
+                                        (map-elt mode :name)
+                                        (map-elt mode :id))
+                                'font-lock-face 'font-lock-function-name-face)))
+            (desc (when (map-elt mode :description)
+                    (propertize (map-elt mode :description)
+                                'font-lock-face 'font-lock-comment-face))))
+        (if desc
+            (concat name "\n" desc)
+          name)))
+    modes)
+   "\n\n"))
 
 (defun agent-shell--format-available-models (models)
-  "Format MODELS for shell rendering.
-
-Mark model using CURRENT-MODEL-ID."
-  (agent-shell--align-alist
-   :data models
-   :columns (list
-             (lambda (model)
-               (concat
-                (when (map-elt model :name)
-                  (propertize (map-elt model :name)
-                              'font-lock-face 'font-lock-function-name-face))
-                (when (map-elt model :model-id)
-                  (propertize (format " (%s)" (map-elt model :model-id))
-                              'font-lock-face 'font-lock-function-name-face))))
-             (lambda (model)
-               (when (map-elt model :description)
-                 (propertize (map-elt model :description)
-                             'font-lock-face 'font-lock-comment-face))))
-   :joiner "\n"))
+  "Format MODELS for shell rendering."
+  (string-join
+   (seq-map
+    (lambda (model)
+      (let ((name (concat
+                   (when (map-elt model :name)
+                     (propertize (map-elt model :name)
+                                 'font-lock-face 'font-lock-function-name-face))
+                   (when (map-elt model :model-id)
+                     (propertize (format " (%s)" (map-elt model :model-id))
+                                 'font-lock-face 'font-lock-function-name-face))))
+            (desc (when (map-elt model :description)
+                    (propertize (map-elt model :description)
+                                'font-lock-face 'font-lock-comment-face))))
+        (if desc
+            (concat name "\n" desc)
+          name)))
+    models)
+   "\n\n"))
 
 ;;; Transient
 
