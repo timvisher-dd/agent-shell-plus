@@ -1234,14 +1234,19 @@ code block content
                        test-buffer))
                     ((symbol-function 'shell-maker--process) (lambda () fake-process))
                     ((symbol-function 'shell-maker-finish-output) #'ignore)
+                    ((symbol-function 'agent-shell--handle) #'ignore)
                     (agent-shell-file-completion-enabled nil))
             (let* ((shell-buffer (agent-shell--start :config config
                                                      :no-focus t
                                                      :new-session t))
                    (subs (map-elt (buffer-local-value 'agent-shell--state shell-buffer)
                                   :event-subscriptions)))
-              (should (= 1 (length subs)))
-              (should (eq 'turn-complete (map-elt (car subs) :event))))))
+              ;; Mode-hook subscription should be present among all subscriptions.
+              (should (< 0 (length subs)))
+              (should (seq-find (lambda (sub)
+                                  (and (eq 'turn-complete (map-elt sub :event))
+                                       (eq #'ignore (map-elt sub :on-event))))
+                                subs)))))
       (remove-hook 'agent-shell-mode-hook hook-fn)
       (when (process-live-p fake-process)
         (delete-process fake-process))
@@ -2061,6 +2066,36 @@ code block content
         (should-not (map-elt agent-shell--state :idle-notification-timer))
         (should-not (memq #'agent-shell--idle-notification-cancel
                           (buffer-local-value 'post-command-hook (current-buffer))))))))
+
+(ert-deftest agent-shell--idle-notification-subscribe-turn-complete-starts-test ()
+  "Test that `turn-complete' event starts idle notification via subscription."
+  (with-temp-buffer
+    (let ((agent-shell-idle-notification-delay 30)
+          (agent-shell--state (list (cons :buffer (current-buffer))
+                                    (cons :event-subscriptions nil)
+                                    (cons :idle-notification-timer nil))))
+      (cl-letf (((symbol-function 'agent-shell--state)
+                 (lambda () agent-shell--state)))
+        (agent-shell--idle-notification-subscribe (current-buffer))
+        (should-not (map-elt agent-shell--state :idle-notification-timer))
+        (agent-shell--emit-event :event 'turn-complete)
+        (should (timerp (map-elt agent-shell--state :idle-notification-timer)))
+        (agent-shell--idle-notification-cancel)))))
+
+(ert-deftest agent-shell--idle-notification-subscribe-clean-up-cancels-test ()
+  "Test that `clean-up' event cancels idle notification via subscription."
+  (with-temp-buffer
+    (let ((agent-shell-idle-notification-delay 30)
+          (agent-shell--state (list (cons :buffer (current-buffer))
+                                    (cons :event-subscriptions nil)
+                                    (cons :idle-notification-timer nil))))
+      (cl-letf (((symbol-function 'agent-shell--state)
+                 (lambda () agent-shell--state)))
+        (agent-shell--idle-notification-subscribe (current-buffer))
+        (agent-shell--idle-notification-start)
+        (should (timerp (map-elt agent-shell--state :idle-notification-timer)))
+        (agent-shell--emit-event :event 'clean-up)
+        (should-not (map-elt agent-shell--state :idle-notification-timer))))))
 
 (ert-deftest agent-shell-alert--detect-terminal-term-program-test ()
   "Test terminal detection via TERM_PROGRAM."
