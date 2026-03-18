@@ -53,6 +53,7 @@
 (declare-function agent-shell-copy-session-id "agent-shell")
 (declare-function agent-shell-cycle-session-mode "agent-shell")
 (declare-function agent-shell-interrupt "agent-shell")
+(declare-function agent-shell-interrupt-confirmed-p "agent-shell")
 (declare-function agent-shell-open-transcript "agent-shell")
 (declare-function agent-shell-queue-request "agent-shell")
 (declare-function agent-shell-remove-pending-request "agent-shell")
@@ -223,7 +224,7 @@ Returns an alist with insertion details or nil otherwise:
           (viewport-buffer (current-buffer))
           (prompt (string-trim (buffer-string))))
       (when (agent-shell-viewport--busy-p)
-        (unless (y-or-n-p "Interrupt?")
+        (unless (agent-shell-interrupt-confirmed-p)
           (throw 'exit nil))
         (with-current-buffer shell-buffer
           (agent-shell-interrupt t))
@@ -265,7 +266,7 @@ Returns an alist with insertion details or nil otherwise:
     (let ((shell-buffer (agent-shell-viewport--shell-buffer)))
       (unless (agent-shell-viewport--busy-p)
         (user-error "No pending request"))
-      (unless (y-or-n-p "Interrupt?")
+      (unless (agent-shell-interrupt-confirmed-p)
         (throw 'exit nil))
       (with-current-buffer shell-buffer
         (agent-shell-interrupt t))
@@ -368,18 +369,25 @@ Optionally set its PROMPT and RESPONSE."
   (setq agent-shell-viewport--compose-snapshot nil)
   (let ((viewport-buffer (current-buffer))
         (shell-buffer (agent-shell-viewport--shell-buffer)))
-    ;; View mode
-    (if (or (derived-mode-p 'agent-shell-viewport-view-mode)
-            (with-current-buffer shell-buffer
-              (not (shell-maker-history-position))))
-        (bury-buffer)
-      ;; Edit mode
+    (cond
+     ;; View mode
+     ((derived-mode-p 'agent-shell-viewport-view-mode)
+      (bury-buffer))
+     ;; Edit mode, no history to go back to
+     ((with-current-buffer shell-buffer
+        (not (shell-maker-history-position)))
+      (when (or (string-empty-p (string-trim (buffer-string)))
+                (y-or-n-p "Discard composed prompt? "))
+        (agent-shell-viewport--initialize)
+        (bury-buffer)))
+     ;; Edit mode, has history
+     (t
       (when (or (string-empty-p (string-trim (buffer-string)))
                 (y-or-n-p "Discard composed prompt? "))
         (if agent-shell-prefer-viewport-interaction
             (agent-shell-viewport-view-last)
           (agent-shell-other-buffer)
-          (kill-buffer viewport-buffer))))))
+          (kill-buffer viewport-buffer)))))))
 
 (defun agent-shell-viewport-previous-history ()
   "Insert previous prompt from history into compose buffer."
@@ -738,6 +746,14 @@ With EXISTING-ONLY, only return existing buffers without creating."
   (insert "again")
   (agent-shell-viewport-compose-send))
 
+(defun agent-shell-viewport-reply-continue ()
+  "Reply with \"continue\" and send immediately."
+  (declare (modes agent-shell-viewport-view-mode))
+  (interactive)
+  (agent-shell-viewport-reply)
+  (insert "continue")
+  (agent-shell-viewport-compose-send))
+
 (defun agent-shell-viewport-previous-page ()
   "Show previous interaction (request / response)."
   (declare (modes agent-shell-viewport-view-mode))
@@ -912,7 +928,7 @@ buffer from the snapshot and switch to edit mode."
       (agent-shell-copy-session-id))))
 
 (defun agent-shell-viewport-open-transcript ()
-  "Open the transcript file for the current agent-shell session."
+  "Open the transcript file for the current `agent-shell' session."
   (declare (modes agent-shell-viewport-view-mode
                   agent-shell-viewport-edit-mode))
   (interactive)
@@ -990,6 +1006,7 @@ VIEWPORT-BUFFER is the viewport buffer to check."
     (define-key map (kbd "v") #'agent-shell-viewport-set-session-model)
     (define-key map (kbd "m") #'agent-shell-viewport-reply-more)
     (define-key map (kbd "a") #'agent-shell-viewport-reply-again)
+    (define-key map (kbd "c") #'agent-shell-viewport-reply-continue)
     (define-key map (kbd "s") #'agent-shell-viewport-set-session-mode)
     (define-key map (kbd "o") #'agent-shell-other-buffer)
     (define-key map (kbd "C-c C-o") #'agent-shell-other-buffer)
@@ -1026,6 +1043,9 @@ VIEWPORT-BUFFER is the viewport buffer to check."
                            (:if-not . agent-shell-viewport--busy-p))
                           ((:function . agent-shell-other-buffer)
                            (:description . "Switch to shell")
+                           (:transient . nil))
+                          ((:function . bury-buffer)
+                           (:description . "Close")
                            (:transient . nil)))))
                 (apply #'vector ""
                        (agent-shell-viewport--make-transient-group
@@ -1042,23 +1062,29 @@ VIEWPORT-BUFFER is the viewport buffer to check."
                           ((:function . agent-shell-viewport-reply-again)
                            (:description . "Reply \"again\"")
                            (:if-not . agent-shell-viewport--busy-p))
+                          ((:function . agent-shell-viewport-reply-continue)
+                           (:description . "Reply \"continue\"")
+                           (:if-not . agent-shell-viewport--busy-p))
                           ((:function . agent-shell-viewport-reply-1)
                            (:description . "Reply \"1\"")
                            (:if-not . agent-shell-viewport--busy-p)))))
                 (apply #'vector ""
                        (agent-shell-viewport--make-transient-group
                         agent-shell-viewport-view-mode-map
-                        '(((:function . agent-shell-viewport-set-session-model)
+                        '(((:function . agent-shell-viewport-reply-2)
+                           (:description . "Reply \"2\"")
+                           (:if-not . agent-shell-viewport--busy-p))
+                          ((:function . agent-shell-viewport-reply-3)
+                           (:description . "Reply \"3\"")
+                           (:if-not . agent-shell-viewport--busy-p))
+                          ((:function . agent-shell-viewport-set-session-model)
                            (:description . "Set model"))
                           ((:function . agent-shell-viewport-set-session-mode)
                            (:description . "Set mode"))
                           ((:function . agent-shell-viewport-cycle-session-mode)
                            (:description . "Cycle mode"))
                           ((:function . agent-shell-viewport-interrupt)
-                           (:description . "Interrupt"))
-                          ((:function . bury-buffer)
-                           (:description . "Close")
-                           (:transient . nil)))))
+                           (:description . "Interrupt")))))
                 (apply #'vector ""
                        (agent-shell-viewport--make-transient-group
                         agent-shell-viewport-view-mode-map

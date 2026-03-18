@@ -32,7 +32,7 @@ Thank you!
 
 A native Emacs shell to interact with LLM agents powered by ACP ([[https://agentclientprotocol.com][Agent Client Protocol]]).
 
-With agent-shell, you can chat with the likes of Gemini CLI, Claude Code, Auggie, Mistral Vibe, or any other ACP-driven agent.
+With agent-shell, you can chat with the likes of Gemini CLI, Claude Agent, Auggie, Mistral Vibe, or any other ACP-driven agent.
 
 Watch on [[https://www.youtube.com/watch?v=R2Ucr3amgGg][YouTube]]
 
@@ -60,7 +60,8 @@ We now have a handful of additional packages to extend the =agent-shell= experie
 - [[https://github.com/gveres/agent-shell-workspace][agent-shell-workspace]]: Dedicated tab-bar workspace for managing multiple =agent-shell= sessions.
 - [[https://github.com/ElleNajt/agent-shell-to-go][agent-shell-to-go]]: Interact with =agent-shell= sessions from your mobile or any other device via Slack.
 - [[https://github.com/ElleNajt/meta-agent-shell][meta-agent-shell]]: Multi-agent coordination system for =agent-shell= with inter-agent communication, task tracking, and project-level dispatching.
-- [[https://github.com/xenodium/emacs-skills][emacs-skills]]: Claude Code skills for Emacs.
+- [[https://github.com/xenodium/agent-shell-knockknock][agent-shell-knockknock]]: Notifications for =agent-shell= via [[https://github.com/konrad1977/knockknock][knockknock.el]].
+- [[https://github.com/xenodium/emacs-skills][emacs-skills]]: Claude Agent skills for Emacs.
 
 * Icons
 
@@ -70,9 +71,9 @@ Thanks to [[https://github.com/lobehub/lobe-icons][Lobe Icons]] for the lovely i
 
 ** External dependencies
 
-*** Claude Code
+*** Claude Agent SDK
 
-For Anthropic's Claude Code, follow [[https://github.com/zed-industries/claude-agent-acp][Zed's claude-agent-acp instructions]], typically something like:
+For Anthropic's [[https://platform.claude.com/docs/en/agent-sdk/overview][Claude Agent SDK]] (formerly known as the Claude Code SDK), follow [[https://github.com/zed-industries/claude-agent-acp][Zed's claude-agent-acp instructions]], typically something like:
 
 #+begin_src bash
 npm install -g @zed-industries/claude-agent-acp
@@ -390,7 +391,7 @@ For API key authentication:
 
 *** Customizing Available Agents
 
-By default, =agent-shell= includes configurations for all supported agents (Claude Code, Gemini CLI, Codex, Goose, Qwen Code, and Auggie). You can customize which agents are available through the =agent-shell-agent-configs= variable.
+By default, =agent-shell= includes configurations for all supported agents (Claude Agent, Gemini CLI, Codex, Goose, Qwen Code, and Auggie). You can customize which agents are available through the =agent-shell-agent-configs= variable.
 
 ** Usage
 
@@ -404,7 +405,7 @@ You can select and start any of the known agent shells (see =agent-shell-agent-c
 
 Start a specific agent shell session directly:
 
-- =M-x agent-shell-anthropic-start-claude-code= - Start a Claude Code agent session
+- =M-x agent-shell-anthropic-start-claude-code= - Start a Claude Agent session
 - =M-x agent-shell-auggie-start-agent= - Start an Auggie agent session
 - =M-x agent-shell-openai-start-codex= - Start a Codex agent session
 - =M-x agent-shell-google-start-gemini= - Start a Gemini agent session
@@ -717,7 +718,7 @@ always go to Evil modes if you need to with ~C-z~).
 |-----------------+---------------------------------------------------------+-------------------------------------------------------------------------------|
 |                 | agent-shell                                             | Start or reuse an existing agent shell.                                       |
 |                 | agent-shell--display-buffer                             | Toggle agent SHELL-BUFFER display.                                            |
-|                 | agent-shell-anthropic-start-claude-code                 | Start an interactive Claude Code agent shell.                                 |
+|                 | agent-shell-anthropic-start-claude-code                 | Start an interactive Claude Agent shell.                                      |
 |                 | agent-shell-auggie-start-agent                          | Start an interactive Auggie agent shell.                                      |
 |                 | agent-shell-clear-buffer                                | Clear the current shell buffer.                                               |
 |                 | agent-shell-completion-mode                             | Toggle agent shell completion with @ or / prefix.                             |
@@ -834,7 +835,7 @@ Sometimes including a traffic screenshot in an issue is enough. Other times incl
 
 If you're able to determine the agent is missing a feature (or a bug is present) in their [[https://agentclientprotocol.com][Agent Client Protocol]] implementation, please file an issue directly with the agent folks. For example:
 
-- [[https://github.com/zed-industries/claude-code-acp][claude-code-acp]]: For Claude Code.
+- [[https://github.com/zed-industries/claude-code-acp][claude-code-acp]]: For Claude Agent.
 - [[https://github.com/zed-industries/codex-acp][codex-acp]]: For Codex.
 - [[https://github.com/google-gemini/gemini-cli][Gemini CLI]].
 - [[https://block.github.io/goose/docs/getting-started/installation][Goose]].

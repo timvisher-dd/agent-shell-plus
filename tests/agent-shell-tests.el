@@ -1209,6 +1209,45 @@ code block content
         (should (equal (map-elt (map-elt data :tool-call) :title)
                        "Run command"))))))
 
+(ert-deftest agent-shell-mode-hook-subscriptions-survive-state-init ()
+  "Subscriptions registered via `agent-shell-mode-hook' should persist."
+  (let ((test-buffer nil)
+        (hook-fn (lambda ()
+                   (agent-shell-subscribe-to
+                    :shell-buffer (current-buffer)
+                    :event 'turn-complete
+                    :on-event #'ignore)))
+        (fake-process (start-process "fake-agent" nil "cat"))
+        (config (list (cons :buffer-name "test-agent")
+                      (cons :client-maker
+                            (lambda (_buf)
+                              (list (cons :command "cat")))))))
+    (unwind-protect
+        (progn
+          (add-hook 'agent-shell-mode-hook hook-fn)
+          (cl-letf (((symbol-function 'shell-maker-start)
+                     (lambda (_config &rest _args)
+                       (setq test-buffer (get-buffer-create "*test-agent-shell*"))
+                       (with-current-buffer test-buffer
+                         (setq major-mode 'agent-shell-mode)
+                         (run-hooks 'agent-shell-mode-hook))
+                       test-buffer))
+                    ((symbol-function 'shell-maker--process) (lambda () fake-process))
+                    ((symbol-function 'shell-maker-finish-output) #'ignore)
+                    (agent-shell-file-completion-enabled nil))
+            (let* ((shell-buffer (agent-shell--start :config config
+                                                     :no-focus t
+                                                     :new-session t))
+                   (subs (map-elt (buffer-local-value 'agent-shell--state shell-buffer)
+                                  :event-subscriptions)))
+              (should (= 1 (length subs)))
+              (should (eq 'turn-complete (map-elt (car subs) :event))))))
+      (remove-hook 'agent-shell-mode-hook hook-fn)
+      (when (process-live-p fake-process)
+        (delete-process fake-process))
+      (when (and test-buffer (buffer-live-p test-buffer))
+        (kill-buffer test-buffer)))))
+
 (ert-deftest agent-shell--initiate-session-prefers-list-and-load-when-supported ()
   "Test `agent-shell--initiate-session' prefers session/list + session/load."
   (with-temp-buffer
@@ -2251,6 +2290,64 @@ code block content
         (with-current-buffer log-buf
           (should (equal (buffer-string) "")))
         (kill-buffer log-buf)))))
+
+;;; Tests for agent-shell-show-context-usage-indicator
+
+(ert-deftest agent-shell--context-usage-indicator-bar-test ()
+  "Test `agent-shell--context-usage-indicator' bar mode."
+  (let ((agent-shell--state
+         (list (cons :buffer (current-buffer))
+               (cons :usage (list (cons :context-used 50000)
+                                  (cons :context-size 200000)
+                                  (cons :total-tokens 50000))))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state)))
+      (let ((agent-shell-show-context-usage-indicator t))
+        (let ((result (agent-shell--context-usage-indicator)))
+          (should result)
+          (should (= (length (substring-no-properties result)) 1))
+          (should (eq (get-text-property 0 'face result) 'success)))))))
+
+(ert-deftest agent-shell--context-usage-indicator-detailed-test ()
+  "Test `agent-shell--context-usage-indicator' detailed mode."
+  (let ((agent-shell--state
+         (list (cons :buffer (current-buffer))
+               (cons :usage (list (cons :context-used 30000)
+                                  (cons :context-size 200000)
+                                  (cons :total-tokens 30000))))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state)))
+      (let ((agent-shell-show-context-usage-indicator 'detailed))
+        (let ((result (agent-shell--context-usage-indicator)))
+          (should result)
+          (should (string-match-p "30k/200k" (substring-no-properties result)))
+          (should (string-match-p "15%%" (substring-no-properties result)))
+          (should (eq (get-text-property 0 'face result) 'success)))))))
+
+(ert-deftest agent-shell--context-usage-indicator-detailed-warning-test ()
+  "Test `agent-shell--context-usage-indicator' detailed mode with warning face."
+  (let ((agent-shell--state
+         (list (cons :buffer (current-buffer))
+               (cons :usage (list (cons :context-used 140000)
+                                  (cons :context-size 200000)
+                                  (cons :total-tokens 140000))))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state)))
+      (let ((agent-shell-show-context-usage-indicator 'detailed))
+        (let ((result (agent-shell--context-usage-indicator)))
+          (should (eq (get-text-property 0 'face result) 'warning)))))))
+
+(ert-deftest agent-shell--context-usage-indicator-nil-test ()
+  "Test `agent-shell--context-usage-indicator' returns nil when disabled."
+  (let ((agent-shell--state
+         (list (cons :buffer (current-buffer))
+               (cons :usage (list (cons :context-used 50000)
+                                  (cons :context-size 200000)
+                                  (cons :total-tokens 50000))))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state)))
+      (let ((agent-shell-show-context-usage-indicator nil))
+        (should-not (agent-shell--context-usage-indicator))))))
 
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here

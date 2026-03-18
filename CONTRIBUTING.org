@@ -54,6 +54,18 @@ Accessing and working with =alists=? Please prefer =map.el= unless we have a str
   (map-elt animal :species)
 #+end_src
 
+** Prefer =map-nested-elt= over nested =map-elt=
+
+When accessing nested alist values, use =map-nested-elt= instead of nesting =map-elt= calls.
+
+#+begin_src emacs-lisp :lexical no
+  ;; Avoid
+  (map-elt (map-elt response 'usage) 'totalTokens)
+
+  ;; Prefer
+  (map-nested-elt response '(usage totalTokens))
+#+end_src
+
 ** cl-lib (limited to =cl-defun=)
 
 While I'm a fan of =cl-defun=, please limit =cl= usage to =cl-defun= if possible. Nothing against =cl-lib=. I'm just limiting the surface and number of idioms I need to keep in my head to maintain the codebase. Often, =seq.el= and =map.el= can do the job just fine.
@@ -146,7 +158,9 @@ When defining hook functions or callbacks, prefer a single alist/event parameter
 
 Remove comments obviously by an LLM (e.g. referencing "previous code" or restating the obvious). Avoid emojis in code and output strings.
 
-** Keep PRs focused
+** Keep PRs small and focused
+
+Prefer smaller PRs whenever possible. They're easier to review and less likely to introduce issues. If a change can be split into independent steps, submit them as separate PRs.
 
 Don't include unrelated changes (whitespace, indentation, formatting) in your PR. If you'd like to do a cleanup, please submit it as a separate PR.
 

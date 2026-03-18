@@ -68,6 +68,14 @@ via `agent-shell-diff-mode-map'."
   (set-keymap-parent agent-shell-diff-mode-map nil)
   (setq buffer-read-only t))
 
+(defun agent-shell-diff-kill-buffer (buffer)
+  "Kill diff BUFFER, suppressing any `agent-shell-on-exit' callback.
+If BUFFER is not live, do nothing."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq agent-shell-on-exit nil))
+    (kill-buffer buffer)))
+
 (defun agent-shell-diff-accept-all ()
   "Accept all changes in the current diff buffer."
   (interactive)
@@ -89,6 +97,8 @@ Creates a new buffer showing the differences between OLD and NEW
 using `agent-shell-diff-mode'.  The buffer is read-only.
 
 When the buffer is killed, calls ON-EXIT with no arguments.
+
+Returns the newly created diff buffer.
 
 Arguments:
   :OLD       - Original string content
@@ -154,18 +164,15 @@ Arguments:
               (setq agent-shell-on-exit on-exit)
               (add-hook 'kill-buffer-hook
                         (lambda ()
-                          (with-current-buffer diff-buffer
-                            (when agent-shell-on-exit
-                              (with-current-buffer calling-buffer
-                                (funcall on-exit))))
-                          (with-current-buffer calling-buffer
-                            ;; Make sure give focus back to calling buffer on exit.
-                            (if (window-live-p calling-window)
-                                (if (eq (window-buffer calling-window) calling-buffer)
-                                    ;; Calling buffer still on calling window, just select it.
-                                    (select-window calling-window)
-                                  ;; Calling buffer not on calling window, restore it.
-                                  (progn
+                          (when (and agent-shell-on-exit
+                                     (buffer-live-p calling-buffer))
+                            (with-current-buffer calling-buffer
+                              (funcall on-exit))
+                            ;; Give focus back to calling buffer.
+                            (ignore-errors
+                              (if (window-live-p calling-window)
+                                  (if (eq (window-buffer calling-window) calling-buffer)
+                                      (select-window calling-window)
                                     (set-window-buffer calling-window calling-buffer)
                                     (select-window calling-window))))))
                         nil t))
@@ -185,7 +192,8 @@ Arguments:
                     "\\[agent-shell-diff-accept-all] accept  "
                     "\\[agent-shell-diff-reject-all] reject  "
                     "\\[agent-shell-diff-open-file] open  "
-                    "\\[kill-current-buffer] quit")))))
+                    "\\[kill-current-buffer] quit"))))
+          diff-buffer)
       (pop-to-buffer diff-buffer '((display-buffer-use-some-window
                                     display-buffer-same-window))))))
 
