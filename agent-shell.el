@@ -2340,7 +2340,6 @@ DIFF should be in the form returned by `agent-shell--make-diff-info':
 For example, shut down ACP client."
   (unless (derived-mode-p 'agent-shell-mode)
     (error "Not in a shell"))
-  (agent-shell--idle-notification-cancel)
   (agent-shell--emit-event :event 'clean-up)
   (agent-shell--shutdown)
   ;; Kill any open diff buffers associated with tool calls.
@@ -2769,6 +2768,8 @@ variable (see makunbound)"))
       ;; `agent-shell--handle'.  Fire mode hook so initial
       ;; state is available to agent-shell-mode-hook(s).
       (run-hooks 'agent-shell-mode-hook)
+      ;; Subscribe to lifecycle events for idle notification management.
+      (agent-shell--idle-notification-subscribe shell-buffer)
       ;; Subscribe to session selection events (needed regardless of focus).
       (when (eq agent-shell-session-strategy 'prompt)
         (agent-shell-subscribe-to
@@ -3727,6 +3728,21 @@ when the prompt is idle and waiting for input."
                                  (with-current-buffer shell-buffer
                                    (agent-shell--idle-notification-fire))))))
       (add-hook 'post-command-hook #'agent-shell--idle-notification-cancel nil t))))
+
+(defun agent-shell--idle-notification-subscribe (shell-buffer)
+  "Subscribe to events in SHELL-BUFFER to manage idle notifications.
+Starts the idle notification timer on `turn-complete' and cancels
+it on `clean-up'."
+  (agent-shell-subscribe-to
+   :shell-buffer shell-buffer
+   :event 'turn-complete
+   :on-event (lambda (_event)
+               (agent-shell--idle-notification-start)))
+  (agent-shell-subscribe-to
+   :shell-buffer shell-buffer
+   :event 'clean-up
+   :on-event (lambda (_event)
+               (agent-shell--idle-notification-cancel))))
 
 ;;; Initialization
 
@@ -4782,7 +4798,6 @@ If FILE-PATH is not an image, returns nil."
                       :event 'turn-complete
                       :data (list (cons :stop-reason (map-elt acp-response 'stopReason))
                                   (cons :usage (map-elt (agent-shell--state) :usage))))
-                     (agent-shell--idle-notification-start)
                      ;; Update viewport header (longer busy)
                      (when-let ((viewport-buffer (agent-shell-viewport--buffer
                                                   :shell-buffer shell-buffer
