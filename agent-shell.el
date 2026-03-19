@@ -55,6 +55,7 @@
 (require 'agent-shell-cursor)
 (require 'agent-shell-devcontainer)
 (require 'agent-shell-diff)
+(require 'agent-shell-experimental)
 (require 'agent-shell-droid)
 (require 'agent-shell-github)
 (require 'agent-shell-google)
@@ -1382,12 +1383,13 @@ COMMAND, when present, may be a shell command string or an argv vector."
            ;; Notification is out of context (session/prompt finished).
            ;; Cannot derive where to display, so show in minibuffer.
            (if (not (agent-shell--active-requests-p state))
-               (message "%s %s (stale, consider reporting to ACP agent)"
-                        (agent-shell--make-status-kind-label
-                         :status (map-nested-elt acp-notification '(params update status))
-                         :kind (map-nested-elt acp-notification '(params update kind)))
-                        (propertize (or (map-nested-elt acp-notification '(params update title)) "")
-                                    'face font-lock-doc-markup-face))
+               (when acp-logging-enabled
+                 (message "%s %s (stale, consider reporting to ACP agent)"
+                          (agent-shell--make-status-kind-label
+                           :status (map-nested-elt acp-notification '(params update status))
+                           :kind (map-nested-elt acp-notification '(params update kind)))
+                          (propertize (or (map-nested-elt acp-notification '(params update title)) "")
+                                      'face font-lock-doc-markup-face)))
              (agent-shell--save-tool-call
               state
               (map-nested-elt acp-notification '(params update toolCallId))
@@ -1434,10 +1436,11 @@ COMMAND, when present, may be a shell command string or an argv vector."
            ;; Notification is out of context (session/prompt finished).
            ;; Cannot derive where to display, so show in minibuffer.
            (if (not (agent-shell--active-requests-p state))
-               (message "%s %s (stale, consider reporting to ACP agent): %s"
-                        agent-shell-thought-process-icon
-                        (propertize "Thinking" 'face font-lock-doc-markup-face)
-                        (truncate-string-to-width (map-nested-elt acp-notification '(params update content text)) 100))
+               (when acp-logging-enabled
+                 (message "%s %s (stale, consider reporting to ACP agent): %s"
+                          agent-shell-thought-process-icon
+                          (propertize "Thinking" 'face font-lock-doc-markup-face)
+                          (truncate-string-to-width (map-nested-elt acp-notification '(params update content text)) 100)))
              (unless (equal (map-elt state :last-entry-type)
                             "agent_thought_chunk")
                (map-put! state :chunked-group-count (1+ (map-elt state :chunked-group-count)))
@@ -1465,8 +1468,9 @@ COMMAND, when present, may be a shell command string or an argv vector."
            ;; Notification is out of context (session/prompt finished).
            ;; Cannot derive where to display, so show in minibuffer.
            (if (not (agent-shell--active-requests-p state))
-               (message "Agent message (stale, consider reporting to ACP agent): %s"
-                        (truncate-string-to-width (map-nested-elt acp-notification '(params update content text)) 100))
+               (when acp-logging-enabled
+                 (message "Agent message (stale, consider reporting to ACP agent): %s"
+                          (truncate-string-to-width (map-nested-elt acp-notification '(params update content text)) 100)))
              (unless (equal (map-elt state :last-entry-type) "agent_message_chunk")
                (map-put! state :chunked-group-count (1+ (map-elt state :chunked-group-count)))
                (agent-shell--append-transcript
@@ -1492,10 +1496,13 @@ COMMAND, when present, may be a shell command string or an argv vector."
               :render-body-images t)
              (map-put! state :last-entry-type "agent_message_chunk")))
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "user_message_chunk")
-           ;; Only handle user_message_chunks when there's an active session/load to avoid
-           ;; inserting a redundant shell prompt with the existing user submission.
+           ;; Only handle user_message_chunks when there's an active session/load
+           ;; or session/pushPrompt to avoid inserting a redundant shell prompt
+           ;; with the existing user submission.
            (when (seq-find (lambda (r)
-                             (equal (map-elt r :method) "session/load"))
+                             (member (map-elt r :method)
+                                     (append '("session/load")
+                                             (agent-shell-experimental--methods))))
                            (map-elt state :active-requests))
              (let ((new-prompt-p (not (equal (map-elt state :last-entry-type)
                                              "user_message_chunk"))))
@@ -1537,12 +1544,13 @@ COMMAND, when present, may be a shell command string or an argv vector."
            ;; Notification is out of context (session/prompt finished).
            ;; Cannot derive where to display, so show in minibuffer.
            (if (not (agent-shell--active-requests-p state))
-               (message "%s %s (stale, consider reporting to ACP agent)"
-                        (agent-shell--make-status-kind-label
-                         :status (map-nested-elt acp-notification '(params update status))
-                         :kind (map-nested-elt acp-notification '(params update kind)))
-                        (propertize (or (map-nested-elt acp-notification '(params update title)) "")
-                                    'face font-lock-doc-markup-face))
+               (when acp-logging-enabled
+                 (message "%s %s (stale, consider reporting to ACP agent)"
+                          (agent-shell--make-status-kind-label
+                           :status (map-nested-elt acp-notification '(params update status))
+                           :kind (map-nested-elt acp-notification '(params update kind)))
+                          (propertize (or (map-nested-elt acp-notification '(params update title)) "")
+                                      'face font-lock-doc-markup-face)))
              ;; Update stored tool call data with new status and content
              (agent-shell--save-tool-call
               state
@@ -1621,7 +1629,7 @@ COMMAND, when present, may be a shell command string or an argv vector."
                                                              :command)))
                       ;; Prepend fenced command to body.
                       (command-block (when saved-command
-                                      (concat "```console\n" saved-command "\n```"))))
+                                       (concat "```console\n" saved-command "\n```"))))
                  (agent-shell--update-fragment
                   :state state
                   :block-id (map-nested-elt acp-notification '(params update toolCallId))
@@ -1666,6 +1674,12 @@ COMMAND, when present, may be a shell command string or an argv vector."
            (agent-shell--update-header-and-mode-line)
            ;; Note: This is session-level state, no need to set :last-entry-type
            nil)
+          ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "end_of_session_push_prompt")
+           (agent-shell-experimental--on-end-of-push-prompt
+            :state state
+            :on-finished (lambda ()
+                           (shell-maker-finish-output :config shell-maker--config
+                                                      :success t))))
           (acp-logging-enabled
            (agent-shell--update-fragment
             :state state
@@ -1763,6 +1777,17 @@ COMMAND, when present, may be a shell command string or an argv vector."
           :acp-request acp-request))
         ((equal (map-elt acp-request 'method) "fs/write_text_file")
          (agent-shell--on-fs-write-text-file-request
+          :state state
+          :acp-request acp-request))
+        ((equal (map-elt acp-request 'method) "session/pushPrompt")
+         ;; Remove trailing empty shell prompt before push content.
+         (when-let* ((comint-last-prompt)
+                     (prompt-start (car comint-last-prompt))
+                     (prompt-end (cdr comint-last-prompt))
+                     ((= (marker-position prompt-end) (point-max)))
+                     (inhibit-read-only t))
+           (delete-region (marker-position prompt-start) (point-max)))
+         (agent-shell-experimental--on-push-prompt-request
           :state state
           :acp-request acp-request))
         (t
@@ -4370,15 +4395,21 @@ normalized server configs."
   (acp-subscribe-to-errors
    :client (map-elt state :client)
    :on-error (lambda (acp-error)
-               (agent-shell--update-fragment
-                :state state
-                :block-id (format "%s-notices"
-                                  (map-elt state :request-count))
-                :label-left (propertize "Notices" 'font-lock-face 'font-lock-doc-markup-face) ;;
-                :body (or (map-elt acp-error 'message)
-                          (map-elt acp-error 'data)
-                          "Something is up ¯\\_ (ツ)_/¯")
-                :append t)))
+               (if (agent-shell--active-requests-p state)
+                   (agent-shell--update-fragment
+                    :state state
+                    :block-id (format "%s-notices"
+                                      (map-elt state :request-count))
+                    :label-left (propertize "Notices" 'font-lock-face 'font-lock-doc-markup-face) ;;
+                    :body (or (map-elt acp-error 'message)
+                              (map-elt acp-error 'data)
+                              "Something is up ¯\\_ (ツ)_/¯")
+                    :append t)
+                 (when acp-logging-enabled
+                   (message "Agent notice (stale): %s"
+                            (or (map-elt acp-error 'message)
+                                (map-elt acp-error 'data)
+                                "Something is up ¯\\_ (ツ)_/¯"))))))
   (acp-subscribe-to-notifications
    :client (map-elt state :client)
    :on-notification (lambda (acp-notification)
