@@ -6,11 +6,18 @@ A soft fork of [[https://github.com/xenodium/agent-shell][agent-shell]] with ext
 * Features on top of agent-shell
 
 - CI workflow and local test runner ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/6][#6]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]])
+  - Byte-compilation of all =.el= files ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]])
+  - ERT test suite ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]])
+  - README update check when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])
+  - Dependency DAG check (=require= graph must be acyclic) ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
 - Desktop notifications when the prompt is idle and waiting for input ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]])
 - Per-shell debug logging infrastructure ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]])
 - Regression tests for shell buffer selection ordering ([[https://github.com/timvisher-dd/agent-shell-plus/pull/3][#3]])
 - CI check that README.org is updated when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])
 - Usage tests and defense against ACP =used > size= bug ([[https://github.com/timvisher-dd/agent-shell-plus/pull/5][#5]])
+- Streaming tool output with dedup: advertise =_meta.terminal_output= capability, handle incremental chunks from codex-acp and batch results from claude-agent-acp, strip =<persisted-output>= tags, fix O(n²) rendering, and partial-overlap thought dedup ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
+- DWIM context insertion: inserted context lands at the prompt and fragment updates no longer drag process-mark past it ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
+- Runtime buffer invariant checking with event tracing and violation debug bundles ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
 
 -----
 
