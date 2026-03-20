@@ -31,3 +31,11 @@ When adding or changing features:
    changes land. Both `bin/test` and CI enforce this — changes to `.el`
    or `tests/` files without a corresponding `README.org` update will
    fail.
+3. **Live-validate rendering changes.** For changes to the rendering
+   pipeline (fragment insertion, streaming, markers, UI), run a live
+   batch session to verify fragment ordering and buffer integrity.
+   See `.agents/commands/live-validate.md` for details. The key command:
+   ```bash
+   timvisher_agent_shell_checkout=. timvisher_emacs_agent_shell claude --batch \
+     1>/tmp/agent-shell-live.log 2>&1
+   ```
