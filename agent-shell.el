@@ -3121,7 +3121,7 @@ The model contains all inputs needed to render the graphical header."
       (:model-name . ,model-name)
       (:mode-id . ,mode-id)
       (:mode-name . ,mode-name)
-      (:directory . ,default-directory)
+      (:project-name . ,(agent-shell--project-name))
       (:session-id . ,(agent-shell--session-id-indicator))
       (:frame-width . ,(frame-pixel-width))
       (:font-height . ,(frame-char-height))
@@ -3164,8 +3164,7 @@ BINDINGS is a list of alists defining key bindings to display, each with:
                               (if (map-elt header-model :mode-name)
                                   (concat " ➤ " (propertize (map-elt header-model :mode-name) 'font-lock-face 'font-lock-type-face))
                                 "")
-                              (propertize (string-remove-suffix "/" (abbreviate-file-name (map-elt header-model :directory)))
-                                          'font-lock-face 'font-lock-string-face)
+                              (propertize (map-elt header-model :project-name) 'font-lock-face 'font-lock-string-face)
                               (if (map-elt header-model :session-id)
                                   (concat " ➤ " (map-elt header-model :session-id))
                                 "")
@@ -3295,7 +3294,7 @@ BINDINGS is a list of alists defining key bindings to display, each with:
                                       (dom-append-child text-node
                                                         (dom-node 'tspan
                                                                   `((fill . ,(face-attribute 'font-lock-string-face :foreground)))
-                                                                  (string-remove-suffix "/" (abbreviate-file-name (map-elt header-model :directory)))))
+                                                                  (map-elt header-model :project-name)))
                                       ;; Session ID (optional)
                                       (when (map-elt header-model :session-id)
                                         ;; Separator arrow (default foreground)
