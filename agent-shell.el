@@ -6271,7 +6271,7 @@ Optionally, get notified of completion with ON-SUCCESS function."
    (seq-map
     (lambda (mode)
       (let ((name (when (map-elt mode :name)
-                    (propertize (format "%s (%s)"
+                    (propertize (format "%s (id: %s)"
                                         (map-elt mode :name)
                                         (map-elt mode :id))
                                 'font-lock-face 'font-lock-function-name-face)))
@@ -6294,7 +6294,7 @@ Optionally, get notified of completion with ON-SUCCESS function."
                      (propertize (map-elt model :name)
                                  'font-lock-face 'font-lock-function-name-face))
                    (when (map-elt model :model-id)
-                     (propertize (format " (%s)" (map-elt model :model-id))
+                     (propertize (format " (id: %s)" (map-elt model :model-id))
                                  'font-lock-face 'font-lock-function-name-face))))
             (desc (when (map-elt model :description)
                     (propertize (map-elt model :description)
