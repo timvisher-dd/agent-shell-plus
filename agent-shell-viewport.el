@@ -35,6 +35,7 @@
 (require 'flymake)
 (require 'markdown-overlays)
 (require 'shell-maker)
+(require 'transient)
 
 (eval-when-compile
   (require 'cl-lib))
@@ -1014,90 +1015,130 @@ VIEWPORT-BUFFER is the viewport buffer to check."
     map)
   "Keymap for `agent-shell-viewport-view-mode'.")
 
+(transient-define-prefix agent-shell-viewport--help-menu ()
+  "`agent-shell' viewport help menu"
+  [:class transient-columns
+          :setup-children
+          (lambda (_)
+            (transient-parse-suffixes
+             'agent-shell-viewport-help-menu
+             (list
+              (apply #'vector "Viewport Help"
+                     (agent-shell-viewport--make-transient-group
+                      agent-shell-viewport-view-mode-map
+                      '(((:function . agent-shell-viewport-next-item)
+                         (:description . "Next item"))
+                        ((:function . agent-shell-viewport-previous-item)
+                         (:description . "Previous item"))
+                        ((:function . agent-shell-viewport-next-page)
+                         (:description . "Next page")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-viewport-previous-page)
+                         (:description . "Previous Page")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-other-buffer)
+                         (:description . "Switch to shell")
+                         (:transient . nil))
+                        ((:function . bury-buffer)
+                         (:description . "Close")
+                         (:transient . nil)))))
+              (apply #'vector ""
+                     (agent-shell-viewport--make-transient-group
+                      agent-shell-viewport-view-mode-map
+                      '(((:function . agent-shell-viewport-reply)
+                         (:description . "Reply…")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-viewport-reply-yes)
+                         (:description . "Reply \"yes\"")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-viewport-reply-more)
+                         (:description . "Reply \"more\"")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-viewport-reply-again)
+                         (:description . "Reply \"again\"")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-viewport-reply-continue)
+                         (:description . "Reply \"continue\"")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-viewport-reply-1)
+                         (:description . "Reply \"1\"")
+                         (:if-not . agent-shell-viewport--busy-p)))))
+              (apply #'vector ""
+                     (agent-shell-viewport--make-transient-group
+                      agent-shell-viewport-view-mode-map
+                      '(((:function . agent-shell-viewport-reply-2)
+                         (:description . "Reply \"2\"")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-viewport-reply-3)
+                         (:description . "Reply \"3\"")
+                         (:if-not . agent-shell-viewport--busy-p))
+                        ((:function . agent-shell-viewport-set-session-model)
+                         (:description . "Set model"))
+                        ((:function . agent-shell-viewport-set-session-mode)
+                         (:description . "Set mode"))
+                        ((:function . agent-shell-viewport-cycle-session-mode)
+                         (:description . "Cycle mode"))
+                        ((:function . agent-shell-viewport-interrupt)
+                         (:description . "Interrupt")))))
+              (apply #'vector ""
+                     (agent-shell-viewport--make-transient-group
+                      agent-shell-viewport-view-mode-map
+                      '(((:function . agent-shell-viewport-view-traffic)
+                         (:description . "View traffic"))
+                        ((:function . agent-shell-viewport-view-acp-logs)
+                         (:description . "View logs"))
+                        ((:function . agent-shell-viewport-copy-session-id)
+                         (:description . "Copy session ID"))
+                        ((:function . agent-shell-viewport-open-transcript)
+                         (:description . "Open transcript")))))
+              )))])
+
 (defun agent-shell-viewport-help-menu ()
   "Show viewport and display the transient help menu (bound to ? in view mode)."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
   (unless (derived-mode-p 'agent-shell-viewport-view-mode)
     (error "Not in a viewport buffer"))
-  (transient-define-prefix agent-shell-viewport--help-menu ()
-    "`agent-shell' viewport help menu"
-    [:class transient-columns
-            :setup-children
-            (lambda (_)
-              (transient-parse-suffixes
-               'agent-shell-viewport-help-menu
-               (list
-                (apply #'vector "Viewport Help"
-                       (agent-shell-viewport--make-transient-group
-                        agent-shell-viewport-view-mode-map
-                        '(((:function . agent-shell-viewport-next-item)
-                           (:description . "Next item"))
-                          ((:function . agent-shell-viewport-previous-item)
-                           (:description . "Previous item"))
-                          ((:function . agent-shell-viewport-next-page)
-                           (:description . "Next page")
-                           (:if-not . agent-shell-viewport--busy-p))
-                          ((:function . agent-shell-viewport-previous-page)
-                           (:description . "Previous Page")
-                           (:if-not . agent-shell-viewport--busy-p))
-                          ((:function . agent-shell-other-buffer)
-                           (:description . "Switch to shell")
-                           (:transient . nil))
-                          ((:function . bury-buffer)
-                           (:description . "Close")
-                           (:transient . nil)))))
-                (apply #'vector ""
-                       (agent-shell-viewport--make-transient-group
-                        agent-shell-viewport-view-mode-map
-                        '(((:function . agent-shell-viewport-reply)
-                           (:description . "Reply…")
-                           (:if-not . agent-shell-viewport--busy-p))
-                          ((:function . agent-shell-viewport-reply-yes)
-                           (:description . "Reply \"yes\"")
-                           (:if-not . agent-shell-viewport--busy-p))
-                          ((:function . agent-shell-viewport-reply-more)
-                           (:description . "Reply \"more\"")
-                           (:if-not . agent-shell-viewport--busy-p))
-                          ((:function . agent-shell-viewport-reply-again)
-                           (:description . "Reply \"again\"")
-                           (:if-not . agent-shell-viewport--busy-p))
-                          ((:function . agent-shell-viewport-reply-continue)
-                           (:description . "Reply \"continue\"")
-                           (:if-not . agent-shell-viewport--busy-p))
-                          ((:function . agent-shell-viewport-reply-1)
-                           (:description . "Reply \"1\"")
-                           (:if-not . agent-shell-viewport--busy-p)))))
-                (apply #'vector ""
-                       (agent-shell-viewport--make-transient-group
-                        agent-shell-viewport-view-mode-map
-                        '(((:function . agent-shell-viewport-reply-2)
-                           (:description . "Reply \"2\"")
-                           (:if-not . agent-shell-viewport--busy-p))
-                          ((:function . agent-shell-viewport-reply-3)
-                           (:description . "Reply \"3\"")
-                           (:if-not . agent-shell-viewport--busy-p))
-                          ((:function . agent-shell-viewport-set-session-model)
-                           (:description . "Set model"))
-                          ((:function . agent-shell-viewport-set-session-mode)
-                           (:description . "Set mode"))
-                          ((:function . agent-shell-viewport-cycle-session-mode)
-                           (:description . "Cycle mode"))
-                          ((:function . agent-shell-viewport-interrupt)
-                           (:description . "Interrupt")))))
-                (apply #'vector ""
-                       (agent-shell-viewport--make-transient-group
-                        agent-shell-viewport-view-mode-map
-                        '(((:function . agent-shell-viewport-view-traffic)
-                           (:description . "View traffic"))
-                          ((:function . agent-shell-viewport-view-acp-logs)
-                           (:description . "View logs"))
-                          ((:function . agent-shell-viewport-copy-session-id)
-                           (:description . "Copy session ID"))
-                          ((:function . agent-shell-viewport-open-transcript)
-                           (:description . "Open transcript")))))
-                )))])
   (call-interactively #'agent-shell-viewport--help-menu))
+
+(transient-define-prefix agent-shell-viewport--compose-help-menu ()
+  "`agent-shell' viewport compose help menu"
+  [:class transient-columns
+          :setup-children
+          (lambda (_)
+            (transient-parse-suffixes
+             'agent-shell-viewport-compose-help-menu
+             (list
+              (apply #'vector "Compose Help"
+                     (agent-shell-viewport--make-transient-group
+                      agent-shell-viewport-edit-mode-map
+                      '(((:function . agent-shell-viewport-compose-send)
+                         (:description . "Submit"))
+                        ((:function . agent-shell-viewport-compose-cancel)
+                         (:description . "Cancel"))
+                        ((:function . agent-shell-viewport-compose-peek-last)
+                         (:description . "Previous Page")))))
+              (apply #'vector ""
+                     (agent-shell-viewport--make-transient-group
+                      agent-shell-viewport-edit-mode-map
+                      '(((:function . agent-shell-viewport-previous-history)
+                         (:description . "Previous prompt"))
+                        ((:function . agent-shell-viewport-next-history)
+                         (:description . "Next prompt"))
+                        ((:function . agent-shell-viewport-search-history)
+                         (:description . "Search prompts")))))
+              (apply #'vector ""
+                     (agent-shell-viewport--make-transient-group
+                      agent-shell-viewport-edit-mode-map
+                      '(((:function . agent-shell-viewport-set-session-model)
+                         (:description . "Set model"))
+                        ((:function . agent-shell-viewport-set-session-mode)
+                         (:description . "Set mode"))
+                        ((:function . agent-shell-viewport-cycle-session-mode)
+                         (:description . "Cycle mode"))
+                        ((:function . agent-shell-other-buffer)
+                         (:description . "Switch to shell")
+                         (:transient . nil))))))))])
 
 (defun agent-shell-viewport-compose-help-menu ()
   "Show the transient help menu for compose (edit) mode."
@@ -1105,44 +1146,6 @@ VIEWPORT-BUFFER is the viewport buffer to check."
   (interactive)
   (unless (derived-mode-p 'agent-shell-viewport-edit-mode)
     (error "Not in a compose buffer"))
-  (transient-define-prefix agent-shell-viewport--compose-help-menu ()
-    "`agent-shell' viewport compose help menu"
-    [:class transient-columns
-            :setup-children
-            (lambda (_)
-              (transient-parse-suffixes
-               'agent-shell-viewport-compose-help-menu
-               (list
-                (apply #'vector "Compose Help"
-                       (agent-shell-viewport--make-transient-group
-                        agent-shell-viewport-edit-mode-map
-                        '(((:function . agent-shell-viewport-compose-send)
-                           (:description . "Submit"))
-                          ((:function . agent-shell-viewport-compose-cancel)
-                           (:description . "Cancel"))
-                          ((:function . agent-shell-viewport-compose-peek-last)
-                           (:description . "Previous Page")))))
-                (apply #'vector ""
-                       (agent-shell-viewport--make-transient-group
-                        agent-shell-viewport-edit-mode-map
-                        '(((:function . agent-shell-viewport-previous-history)
-                           (:description . "Previous prompt"))
-                          ((:function . agent-shell-viewport-next-history)
-                           (:description . "Next prompt"))
-                          ((:function . agent-shell-viewport-search-history)
-                           (:description . "Search prompts")))))
-                (apply #'vector ""
-                       (agent-shell-viewport--make-transient-group
-                        agent-shell-viewport-edit-mode-map
-                        '(((:function . agent-shell-viewport-set-session-model)
-                           (:description . "Set model"))
-                          ((:function . agent-shell-viewport-set-session-mode)
-                           (:description . "Set mode"))
-                          ((:function . agent-shell-viewport-cycle-session-mode)
-                           (:description . "Cycle mode"))
-                          ((:function . agent-shell-other-buffer)
-                           (:description . "Switch to shell")
-                           (:transient . nil))))))))])
   (call-interactively #'agent-shell-viewport--compose-help-menu))
 
 (defun agent-shell-viewport--make-transient-group (keymap commands)
