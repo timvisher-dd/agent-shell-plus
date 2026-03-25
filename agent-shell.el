@@ -1469,7 +1469,7 @@ COMMAND, when present, may be a shell command string or an argv vector."
                   :state state
                   :block-id (concat (map-nested-elt acp-notification '(params update toolCallId)) "-plan")
                   :label-left (propertize "Proposed plan" 'font-lock-face 'font-lock-doc-markup-face)
-                  :body (map-nested-elt acp-notification '(params update rawInput plan))
+                  :body (agent-shell--format-plan (map-nested-elt acp-notification '(params update rawInput plan)))
                   :expanded t)))
              (map-put! state :last-entry-type "tool_call")))
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "agent_thought_chunk")
@@ -1783,7 +1783,7 @@ COMMAND, when present, may be a shell command string or an argv vector."
               :state state
               :block-id (concat (map-nested-elt acp-request '(params toolCall toolCallId)) "-plan")
               :label-left (propertize "Proposed plan" 'font-lock-face 'font-lock-doc-markup-face)
-              :body (map-nested-elt acp-request '(params toolCall rawInput plan))
+              :body (agent-shell--format-plan (map-nested-elt acp-request '(params toolCall rawInput plan)))
               :expanded t))
            ;; block-id must be the same as the one used
            ;; in agent-shell--delete-fragment param.
@@ -2529,7 +2529,8 @@ Returns propertized labels in :status and :title propertized."
              (lambda (entry)
                (agent-shell--make-status-kind-label :status (map-elt entry 'status)))
              (lambda (entry)
-               (map-elt entry 'content)))
+               (or (map-elt entry 'content)
+                   (map-elt entry 'step))))
    :separator " "
    :joiner "\n"))
 
