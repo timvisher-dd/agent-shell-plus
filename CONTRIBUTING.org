@@ -108,6 +108,20 @@ Overall, try to flatten things. Look out for unnecessarily nested blocks and fla
     buffer)
 #+end_src
 
+Similarly, flatten =when-let= + nested =when= by using boolean guard clauses as bindings in =when-let=.
+
+#+begin_src emacs-lisp :lexical no
+  ;; Avoid
+  (when-let ((filename (file-name-nondirectory filepath)))
+    (when (not (string-empty-p filename))
+      (do-something filename)))
+
+  ;; Prefer (use boolean binding as guard clause)
+  (when-let ((filename (file-name-nondirectory filepath))
+             ((not (string-empty-p filename))))
+    (do-something filename))
+#+end_src
+
 ** Prefer =let= and =when-let= over =let*= and =when-let*=
 
 Only use the =*= variants when bindings depend on each other. LLMs tend to default to =let*= and =when-let*= even when there are no dependencies between bindings.

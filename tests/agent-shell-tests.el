@@ -2326,6 +2326,34 @@ code block content
           (should (equal (buffer-string) "")))
         (kill-buffer log-buf)))))
 
+(ert-deftest agent-shell--on-request-sends-error-for-unhandled-method-test ()
+  "Test `agent-shell--on-request' responds with an error for unknown methods."
+  (with-temp-buffer
+    (let* ((captured-response nil)
+           (state `((:buffer . ,(current-buffer))
+                    (:client . test-client)
+                    (:event-subscriptions . nil)
+                    (:last-entry-type . "previous-entry"))))
+      (cl-letf (((symbol-function 'agent-shell--update-fragment)
+                 (lambda (&rest _)))
+                ((symbol-function 'acp-send-response)
+                 (lambda (&rest args)
+                   (setq captured-response (plist-get args :response))))
+                ((symbol-function 'acp-make-error)
+                 (lambda (&rest args)
+                   `((:code . ,(plist-get args :code))
+                     (:message . ,(plist-get args :message))))))
+        (agent-shell--on-request
+         :state state
+         :acp-request '((id . "req-404")
+                        (method . "unknown/method")))
+        (should (equal (map-elt captured-response :request-id) "req-404"))
+        (let ((error (map-elt captured-response :error)))
+          (should (equal (map-elt error :code) -32601))
+          (should (equal (map-elt error :message)
+                         "Method not found: unknown/method")))
+        (should-not (map-elt state :last-entry-type))))))
+
 ;;; Tests for agent-shell-show-context-usage-indicator
 
 (ert-deftest agent-shell--context-usage-indicator-bar-test ()
@@ -2383,6 +2411,115 @@ code block content
                (lambda () agent-shell--state)))
       (let ((agent-shell-show-context-usage-indicator nil))
         (should-not (agent-shell--context-usage-indicator))))))
+
+;;; Tests for agent-shell--permission-title
+
+(ert-deftest agent-shell--permission-title-read-shows-filename-test ()
+  "Test `agent-shell--permission-title' includes filename for read permission.
+Based on ACP traffic from https://github.com/xenodium/agent-shell/issues/415."
+  (should (equal
+           "external_directory (_event.rs)"
+           (agent-shell--permission-title
+            :acp-request
+            '((params . ((toolCall . ((toolCallId . "call_ad19e402fcb548c3acd48bbd")
+                                      (status . "pending")
+                                      (title . "external_directory")
+                                      (rawInput . ((filepath . "/home/pmw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-sdk-s3-1.112.0/src/types/_event.rs")
+                                                   (parentDir . "/home/pmw/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aws-sdk-s3-1.112.0/src/types")))
+                                      (kind . "other"))))))))))
+
+(ert-deftest agent-shell--permission-title-edit-shows-filename-test ()
+  "Test `agent-shell--permission-title' includes filename for edit permission.
+Based on ACP traffic from https://github.com/xenodium/agent-shell/issues/415."
+  (should (equal
+           "edit (s3notifications.rs)"
+           (agent-shell--permission-title
+            :acp-request
+            '((params . ((toolCall . ((toolCallId . "call_451e5acf91884aecaadf3173")
+                                      (status . "pending")
+                                      (title . "edit")
+                                      (rawInput . ((filepath . "/home/pmw/Repos/warmup-s3-archives/src/s3notifications.rs")
+                                                   (diff . "Index: /home/pmw/Repos/warmup-s3-archives/src/s3notifications.rs\n")))
+                                      (kind . "edit"))))))))))
+
+(ert-deftest agent-shell--permission-title-no-duplicate-filename-test ()
+  "Test `agent-shell--permission-title' does not duplicate filename already in title."
+  (should (equal
+           "Read s3notifications.rs"
+           (agent-shell--permission-title
+            :acp-request
+            '((params . ((toolCall . ((toolCallId . "tc-1")
+                                      (title . "Read s3notifications.rs")
+                                      (rawInput . ((filepath . "/home/user/src/s3notifications.rs")))
+                                      (kind . "read"))))))))))
+
+(ert-deftest agent-shell--permission-title-execute-fenced-test ()
+  "Test `agent-shell--permission-title' fences execute commands."
+  (should (equal
+           "```console\nls -la\n```"
+           (agent-shell--permission-title
+            :acp-request
+            '((params . ((toolCall . ((toolCallId . "tc-1")
+                                      (title . "Bash")
+                                      (rawInput . ((command . "ls -la")))
+                                      (kind . "execute"))))))))))
+
+(ert-deftest agent-shell-restart-preserves-default-directory ()
+  "Restart should use the shell's directory, not the fallback buffer's.
+
+After `kill-buffer' happens during restart, Emacs falls back to another
+buffer.  Without the fix, `default-directory' would be inherited from
+that fallback buffer, potentially starting the new shell in the wrong project."
+  (let ((shell-buffer nil)
+        (other-buffer nil)
+        (captured-dir nil)
+        (frame (make-frame '((visibility . nil))))
+        (project-a "/tmp/project-a/")
+        (project-b "/tmp/project-b/")
+        (config (list (cons :buffer-name "test-agent")
+                      (cons :client-maker
+                            (lambda (_buf)
+                              (list (cons :command "cat")))))))
+    (unwind-protect
+        (progn
+          ;; Create a buffer from "project B" that Emacs will fall back to
+          ;; after the shell buffer is killed.
+          (setq other-buffer (get-buffer-create "*project-b-file*"))
+          (with-current-buffer other-buffer
+            (setq default-directory project-b))
+          ;; Create the shell buffer in "project A".
+          (setq shell-buffer (get-buffer-create "*test-restart-shell*"))
+          (with-current-buffer shell-buffer
+            (setq major-mode 'agent-shell-mode)
+            (setq default-directory project-a)
+            (setq-local agent-shell-session-strategy 'new)
+            (setq-local agent-shell--state
+                        `((:agent-config . ,config)
+                          (:active-requests))))
+          ;; Use a hidden frame and swap buffers around
+          ;; so that when kill-buffer happens it will fallback to project-b
+          ;; rather than the last buffer in the user's frame.
+          (with-selected-frame frame
+            (switch-to-buffer other-buffer)
+            (switch-to-buffer shell-buffer)
+            ;; Mock agent-shell--start to capture default-directory
+            ;; instead of actually starting a shell.
+            (cl-letf (((symbol-function 'agent-shell--start)
+                       (lambda (&rest _args)
+                         (setq captured-dir default-directory)
+                         (get-buffer-create "*test-restart-new-shell*")))
+                      ((symbol-function 'agent-shell--display-buffer)
+                       #'ignore))
+              (agent-shell-restart)))
+          (should (equal captured-dir project-a)))
+      (when (and frame (frame-live-p frame))
+        (delete-frame frame))
+      (when (and shell-buffer (buffer-live-p shell-buffer))
+        (kill-buffer shell-buffer))
+      (when (and other-buffer (buffer-live-p other-buffer))
+        (kill-buffer other-buffer))
+      (when-let ((buf (get-buffer "*test-restart-new-shell*")))
+        (kill-buffer buf)))))
 
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here

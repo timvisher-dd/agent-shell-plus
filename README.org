@@ -38,6 +38,10 @@ Watch on [[https://www.youtube.com/watch?v=R2Ucr3amgGg][YouTube]]
 
 [[https://www.youtube.com/watch?v=R2Ucr3amgGg][file:yt.png]]
 
+[[https://www.youtube.com/watch?v=ymMlftdGx4I][https://img.youtube.com/vi/ymMlftdGx4I/0.jpg]]
+
+[[https://www.youtube.com/watch?v=HJQ86HuSIJI][https://img.youtube.com/vi/HJQ86HuSIJI/0.jpg]]
+
 * News
 
 - [[https://xenodium.com/agent-shell-0-47-1-updates][agent-shell 0.47 updates]].
@@ -53,15 +57,19 @@ Watch on [[https://www.youtube.com/watch?v=R2Ucr3amgGg][YouTube]]
 
 We now have a handful of additional packages to extend the =agent-shell= experience:
 
+- [[https://github.com/xenodium/emacs-skills][emacs-skills]]: Claude Agent skills for Emacs.
+- [[https://github.com/ElleNajt/agent-shell-to-go][agent-shell-to-go]]: Interact with =agent-shell= sessions from your mobile or any other device via Slack.
+- [[https://github.com/Embedded-Focus/agent-circus][agent-circus]]: Run AI coding agents in sandboxed Docker containers.
+- [[https://github.com/cmacrae/agent-shell-sidebar][agent-shell-sidebar]]: A sidebar add-on for =agent-shell=.
+- [[https://github.com/dcluna/agent-shell-bookmark][agent-shell-bookmark]]: Bookmark support for agent-shell sessions.
+- [[https://github.com/gveres/agent-shell-workspace][agent-shell-workspace]]: Dedicated tab-bar workspace for managing multiple =agent-shell= sessions.
+- [[https://github.com/jethrokuan/agent-shell-manager][agent-shell-manager]]: Tabulated view and management of =agent-shell= buffers.
 - [[https://github.com/nineluj/agent-review][agent-review]]: Code review interface for =agent-shell=.
 - [[https://github.com/ultronozm/agent-shell-attention.el][agent-shell-attention.el]]: Mode-line attention tracker for =agent-shell=.
-- [[https://github.com/jethrokuan/agent-shell-manager][agent-shell-manager]]: Tabulated view and management of =agent-shell= buffers.
-- [[https://github.com/cmacrae/agent-shell-sidebar][agent-shell-sidebar]]: A sidebar add-on for =agent-shell=.
-- [[https://github.com/gveres/agent-shell-workspace][agent-shell-workspace]]: Dedicated tab-bar workspace for managing multiple =agent-shell= sessions.
-- [[https://github.com/ElleNajt/agent-shell-to-go][agent-shell-to-go]]: Interact with =agent-shell= sessions from your mobile or any other device via Slack.
-- [[https://github.com/ElleNajt/meta-agent-shell][meta-agent-shell]]: Multi-agent coordination system for =agent-shell= with inter-agent communication, task tracking, and project-level dispatching.
 - [[https://github.com/xenodium/agent-shell-knockknock][agent-shell-knockknock]]: Notifications for =agent-shell= via [[https://github.com/konrad1977/knockknock][knockknock.el]].
-- [[https://github.com/xenodium/emacs-skills][emacs-skills]]: Claude Agent skills for Emacs.
+- [[https://github.com/zackattackz/agent-shell-notifications][agent-shell-notifications]]: Desktop notifications for =agent-shell= events.
+- [[https://github.com/ElleNajt/meta-agent-shell][meta-agent-shell]]: Multi-agent coordination system for =agent-shell= with inter-agent communication, task tracking, and project-level dispatching.
+- [[https://github.com/cxa/agent-shell-macext][agent-shell-macext]]: macOS-specific enhancements for =agent-shell=.
 
 * Icons
 
@@ -73,13 +81,15 @@ Thanks to [[https://github.com/lobehub/lobe-icons][Lobe Icons]] for the lovely i
 
 *** Claude Agent SDK
 
-For Anthropic's [[https://platform.claude.com/docs/en/agent-sdk/overview][Claude Agent SDK]] (formerly known as the Claude Code SDK), follow [[https://github.com/zed-industries/claude-agent-acp][Zed's claude-agent-acp instructions]], typically something like:
+For Anthropic's [[https://code.claude.com/docs/en/overview][Claude Agent]] (formerly known as the Claude Code), follow [[https://github.com/agentclientprotocol/claude-agent-acp][claude-agent-acp instructions]], typically something like:
 
 #+begin_src bash
-npm install -g @zed-industries/claude-agent-acp
+npm install -g @agentclientprotocol/claude-agent-acp
 #+end_src
 
 *Note:* The =-g= flag is required to install the binary globally so it's available in your PATH. After installation, verify it's available by running =which claude-agent-acp= in your terminal.
+
+Optionally: You may also need [[https://code.claude.com/docs/en/overview][Claude Agent]] itself if you want to use a Claude subscription (run the CLI outside of Emacs at least once to log in to your subscription and then use =agent-shell= from Emacs). Follow Claude Agent's [[https://code.claude.com/docs/en/overview#get-started][get started]] for installation.
 
 *** Codex
 
@@ -176,7 +186,7 @@ You can install via:
       :ensure-system-package
       ;; Add agent installation configs here
       ((claude . "brew install claude-code")
-       (claude-agent-acp . "npm install -g @zed-industries/claude-agent-acp")))
+       (claude-agent-acp . "npm install -g @agentclientprotocol/claude-agent-acp")))
 #+end_src
 
 This will automatically install the required dependencies ([[https://melpa.org/#/acp][acp.el]] and [[https://melpa.org/#/shell-maker][shell-maker]]).
@@ -212,7 +222,7 @@ Pass environment variables to the spawned agent process by customizing the `agen
 #+begin_src emacs-lisp
 (setq agent-shell-anthropic-claude-environment
       (agent-shell-make-environment-variables
-       "ANTHROPIC_API_KEY" (auth-source-pass-get "secret" "anthropic-api-key")
+       "ANTHROPIC_API_KEY" (auth-source-pass-get 'secret "anthropic-api-key")
        "HTTPS_PROXY" "http://proxy.example.com:8080"))
 #+end_src
 
@@ -221,7 +231,7 @@ Pass environment variables to the spawned agent process by customizing the `agen
 By default, the agent process starts with a minimal environment. To inherit environment variables from the parent Emacs process, use the `:inherit-env t` parameter in `agent-shell-make-environment-variables`:
 
 #+begin_src emacs-lisp
-  (setenv "ANTHROPIC_API_KEY" (auth-source-pass-get "secret" "anthropic-api-key"))
+  (setenv "ANTHROPIC_API_KEY" (auth-source-pass-get 'secret "anthropic-api-key"))
 
   (setq agent-shell-anthropic-claude-environment
         (agent-shell-make-environment-variables :inherit-env t))
@@ -268,7 +278,20 @@ For API key authentication:
 ;; With function
 (setq agent-shell-anthropic-authentication
       (agent-shell-anthropic-make-authentication
-       :api-key (lambda () (auth-source-pass-get "secret" "anthropic-api-key"))))
+       :api-key (lambda () (auth-source-pass-get 'secret "anthropic-api-key"))))
+#+end_src
+
+For OAuth token authentication (the =CLAUDE_CODE_OAUTH_TOKEN= we get from =claude setup-token=):
+
+#+begin_src emacs-lisp
+;; With string
+(setq agent-shell-anthropic-authentication
+      (agent-shell-anthropic-make-authentication :oauth "your-oauth-token-here"))
+
+;; With function
+(setq agent-shell-anthropic-authentication
+      (agent-shell-anthropic-make-authentication
+       :oauth (lambda () (auth-source-pass-get "secret" "anthropic-oauth-token"))))
 #+end_src
 
 For alternative Anthropic-compatible API endpoints, configure via environment variables:
@@ -300,7 +323,7 @@ For API key authentication:
 ;; With function
 (setq agent-shell-google-authentication
       (agent-shell-google-make-authentication
-       :api-key (lambda () (auth-source-pass-get "secret" "google-api-key"))))
+       :api-key (lambda () (auth-source-pass-get 'secret "google-api-key"))))
 #+end_src
 
 For Vertex AI authentication:
@@ -329,7 +352,7 @@ For API key authentication:
 ;; With function
 (setq agent-shell-openai-authentication
       (agent-shell-openai-make-authentication
-       :api-key (lambda () (auth-source-pass-get "secret" "openai-api-key"))))
+       :api-key (lambda () (auth-source-pass-get 'secret "openai-api-key"))))
 #+end_src
 
 *** Goose
@@ -344,7 +367,7 @@ For OpenAI API key authentication:
 ;; With function
 (setq agent-shell-goose-authentication
       (agent-shell-make-goose-authentication
-       :openai-api-key (lambda () (auth-source-pass-get "secret" "openai-api-key"))))
+       :openai-api-key (lambda () (auth-source-pass-get 'secret "openai-api-key"))))
 #+end_src
 
 *** Qwen Code
@@ -512,6 +535,13 @@ For example, to store data under =user-emacs-directory= instead of the project t
 #+end_src
 
 This stores data at a path like =~/.emacs.d/agent-shell/home-user-src-myproject/screenshots/=.
+
+*** Screenshots from clipboard
+
+You can send a screenshot from your clipboard to your shell with =agent-shell-send-clipboard-image=. Call with =C-u= to =agent-shell-send-clipboard-image-to= to select from your shells. agent-shell relies on external programs to write an image from clipboard to file as configured in =agent-shell-clipboard-image-handlers=. Preconfigured handlers are
+- =wl-paste= for Wayland desktops,
+- =xclip= for Xorg,
+- =pngpaste= for MacOS.
 
 *** Inhibiting minor modes during file writes
 
@@ -805,6 +835,13 @@ Please read through this section before filing issues or feature requests. I won
 - *Your agent-shell config*: Share any relevant =agent-shell= variable settings from your Emacs config.
 - *Profiling data* (for performance issues): Use =M-x profiler-start=, reproduce the issue, then =M-x profiler-report= (and =M-x profiler-stop=). Share the report.
 
+** Why doesn't =agent-shell= offer all slash commands/skills available in CLI agent?
+
+=agent-shell= can only offer the slash commands/skills advertised by the agent via [[https://agentclientprotocol.com][Agent Client Protocol]]. To view what's exposed by your agent, expand the "Available /commands" section. Is the command you're after missing? Please consider filing a feature-request with the respective agent (ie. Gemini CLI) or their ACP layer (claude-code-acp).
+
+[[file:slash-commands.png]]
+
+
 ** Can you add support for another agent?
 
 Does the agent support ACP ([[https://agentclientprotocol.com][Agent Client Protocol]])? If so, =agent-shell= can likely support this agent. Some agents have ACP support built-in (like [[https://github.com/google-gemini/gemini-cli][gemini-cli]]). Others require a separate ACP package (like [[https://github.com/zed-industries/claude-code-acp][claude-code-acp]] for [[https://github.com/anthropics/claude-code][claude-code]]). When filing a feature request to add a new agent, please include a link to the project supporting [[https://agentclientprotocol.com][Agent Client Protocol]] (built-in or otherwise).
@@ -835,7 +872,7 @@ Sometimes including a traffic screenshot in an issue is enough. Other times incl
 
 If you're able to determine the agent is missing a feature (or a bug is present) in their [[https://agentclientprotocol.com][Agent Client Protocol]] implementation, please file an issue directly with the agent folks. For example:
 
-- [[https://github.com/zed-industries/claude-code-acp][claude-code-acp]]: For Claude Agent.
+- [[https://github.com/agentclientprotocol/claude-agent-acp][claude-agent-acp]]: For Claude Agent.
 - [[https://github.com/zed-industries/codex-acp][codex-acp]]: For Codex.
 - [[https://github.com/google-gemini/gemini-cli][Gemini CLI]].
 - [[https://block.github.io/goose/docs/getting-started/installation][Goose]].
