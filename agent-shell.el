@@ -3869,13 +3869,15 @@ SUBSCRIPTION is a token returned by `agent-shell-subscribe-to'."
   "Emit an EVENT to matching subscribers.
 EVENT is a symbol identifying the event.
 DATA is an optional alist of event-specific data."
-  (let ((event-alist (list (cons :event event))))
+  (let ((state (agent-shell--state))
+        (event-alist (list (cons :event event))))
     (when data
       (push (cons :data data) event-alist))
-    (dolist (sub (map-elt (agent-shell--state) :event-subscriptions))
-      (when (or (not (map-elt sub :event))
-                (eq (map-elt sub :event) event))
-        (with-current-buffer (map-elt (agent-shell--state) :buffer)
+    (dolist (sub (map-elt state :event-subscriptions))
+      (when (and (buffer-live-p (map-elt state :buffer))
+                 (or (not (map-elt sub :event))
+                     (eq (map-elt sub :event) event)))
+        (with-current-buffer (map-elt state :buffer)
           (funcall (map-elt sub :on-event) event-alist))))))
 
 ;;; Idle notification
