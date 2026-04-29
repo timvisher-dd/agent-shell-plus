@@ -1837,6 +1837,25 @@ COMMAND, when present, may be a shell command string or an argv vector."
             :create-new t
             :navigation 'never)
            (map-put! state :last-entry-type nil))))
+        ((equal (map-elt acp-notification 'method) "_claude/sdkMessage")
+         ;; claude-agent-acp's raw SDK message passthrough.  Sessions
+         ;; opted into via _meta.claudeCode.emitRawSDKMessages: t (see
+         ;; `agent-shell--session-new-meta') receive every SDK system
+         ;; message here — including hook_started/hook_progress/
+         ;; hook_response events the ACP layer otherwise drops at
+         ;; acp-agent.ts:837-852.  Surfacing them in the debug log lets
+         ;; us see hook-driven turn behavior such as Stop-hook
+         ;; decision:block bounce-and-regenerate cycles.
+         (when agent-shell-logging-enabled
+           (agent-shell--log
+            "_claude/sdkMessage"
+            "%s"
+            (with-temp-buffer
+              (insert (json-serialize
+                       (or (map-nested-elt acp-notification '(params message))
+                           acp-notification)))
+              (json-pretty-print (point-min) (point-max))
+              (buffer-string)))))
         (acp-logging-enabled
          (agent-shell--update-fragment
           :state state
@@ -4564,6 +4583,25 @@ Falls back to latest session in batch mode (e.g. tests)."
   (agent-shell--emit-event :event 'init-session)
   (funcall on-session-init))
 
+(defun agent-shell--session-new-meta ()
+  "Return the `_meta' alist to attach to session/new, or nil.
+
+When `agent-shell-logging-enabled' is non-nil and the active agent
+identifier is `claude-code', request that claude-agent-acp forward
+every raw SDK message (including hook lifecycle events) via the
+`_claude/sdkMessage' extension notification.  Without this opt-in the
+ACP layer drops `hook_started'/`hook_progress'/`hook_response' system
+messages at acp-agent.ts:837-852, leaving the debug log unable to
+reveal hook-driven turn behavior such as Stop-hook block-and-regen
+cycles.  Logging must be enabled before the shell is started for this
+to take effect; toggling it later won't retroactively opt the existing
+session in."
+  (when (and agent-shell-logging-enabled
+             (eq (map-elt (map-elt (agent-shell--state) :agent-config)
+                          :identifier)
+                 'claude-code))
+    '((claudeCode . ((emitRawSDKMessages . t))))))
+
 (cl-defun agent-shell--initiate-new-session (&key shell-buffer on-session-init)
   "Initiate ACP session/new with SHELL-BUFFER and ON-SESSION-INIT."
   (agent-shell--send-request
@@ -4571,7 +4609,8 @@ Falls back to latest session in batch mode (e.g. tests)."
    :client (map-elt (agent-shell--state) :client)
    :request (acp-make-session-new-request
              :cwd (agent-shell--resolve-path (agent-shell-cwd))
-             :mcp-servers (agent-shell--mcp-servers))
+             :mcp-servers (agent-shell--mcp-servers)
+             :meta (agent-shell--session-new-meta))
    :buffer (current-buffer)
    :on-success (lambda (acp-response)
                  (map-put! agent-shell--state

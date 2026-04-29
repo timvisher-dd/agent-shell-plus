@@ -2458,6 +2458,77 @@ code block content
           (should (equal (buffer-string) "")))
         (kill-buffer log-buf)))))
 
+(ert-deftest agent-shell--session-new-meta-opts-in-when-logging-and-claude-code-test ()
+  "When logging is on and identifier is claude-code, request raw SDK messages."
+  (let ((agent-shell-logging-enabled t)
+        (state '((:agent-config . ((:identifier . claude-code))))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () state)))
+      (should (equal (agent-shell--session-new-meta)
+                     '((claudeCode . ((emitRawSDKMessages . t)))))))))
+
+(ert-deftest agent-shell--session-new-meta-nil-when-logging-disabled-test ()
+  "Without logging enabled, no _meta is requested even for claude-code."
+  (let ((agent-shell-logging-enabled nil)
+        (state '((:agent-config . ((:identifier . claude-code))))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () state)))
+      (should-not (agent-shell--session-new-meta)))))
+
+(ert-deftest agent-shell--session-new-meta-nil-for-non-claude-agents-test ()
+  "Other agent identifiers don't receive the claude-specific opt-in."
+  (let ((agent-shell-logging-enabled t)
+        (state '((:agent-config . ((:identifier . gemini))))))
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () state)))
+      (should-not (agent-shell--session-new-meta)))))
+
+(ert-deftest agent-shell--on-notification-logs-claude-sdk-message-test ()
+  "`_claude/sdkMessage' notifications are pretty-printed into the log buffer."
+  (with-temp-buffer
+    (rename-buffer "*agent-shell sdkmsg test*" t)
+    (let* ((log-buf (agent-shell--make-log-buffer (current-buffer)))
+           (agent-shell-logging-enabled t)
+           (state (list (cons :buffer (current-buffer))
+                        (cons :log-buffer log-buf))))
+      (cl-letf (((symbol-function 'agent-shell--state)
+                 (lambda () state)))
+        (agent-shell--on-notification
+         :state state
+         :acp-notification
+         '((method . "_claude/sdkMessage")
+           (params . ((sessionId . "sess-1")
+                      (message . ((type . "system")
+                                  (subtype . "hook_response")
+                                  (hook_name . "Stop")
+                                  (output . "{\"decision\":\"block\"}")))))))
+        (with-current-buffer log-buf
+          (should (string-match-p "_claude/sdkMessage >" (buffer-string)))
+          (should (string-match-p "hook_response" (buffer-string)))
+          (should (string-match-p "decision.*block" (buffer-string))))
+        (kill-buffer log-buf)))))
+
+(ert-deftest agent-shell--on-notification-skips-claude-sdk-message-when-logging-disabled-test ()
+  "With logging off, `_claude/sdkMessage' is silently dropped."
+  (with-temp-buffer
+    (rename-buffer "*agent-shell sdkmsg disabled test*" t)
+    (let* ((log-buf (agent-shell--make-log-buffer (current-buffer)))
+           (agent-shell-logging-enabled nil)
+           (state (list (cons :buffer (current-buffer))
+                        (cons :log-buffer log-buf))))
+      (cl-letf (((symbol-function 'agent-shell--state)
+                 (lambda () state)))
+        (agent-shell--on-notification
+         :state state
+         :acp-notification
+         '((method . "_claude/sdkMessage")
+           (params . ((sessionId . "sess-1")
+                      (message . ((type . "system")
+                                  (subtype . "hook_started")))))))
+        (with-current-buffer log-buf
+          (should (equal (buffer-string) "")))
+        (kill-buffer log-buf)))))
+
 (ert-deftest agent-shell--on-request-sends-error-for-unhandled-method-test ()
   "Test `agent-shell--on-request' responds with an error for unknown methods."
   (with-temp-buffer

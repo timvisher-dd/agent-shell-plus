@@ -20,6 +20,7 @@ A soft fork of [[https://github.com/xenodium/agent-shell][agent-shell]] with ext
 - DWIM context insertion: inserted context lands at the prompt and fragment updates no longer drag process-mark past it ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
 - Runtime buffer invariant checking with event tracing and violation debug bundles ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
 - Render =session/update= chunks streamed after =session/prompt= resolves so a Claude Code Stop-hook bounce-and-regen turn no longer freezes the buffer mid-conversation
+- Surface raw claude-agent-acp SDK messages (including hook lifecycle events) in the debug log when =agent-shell-logging-enabled= is set, so Stop-hook =decision:block= cycles and other hook-driven turn behavior are visible
 
 -----
 
