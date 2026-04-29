@@ -3003,8 +3003,13 @@ Called when a new turn begins or the prompt reappears."
     (set-marker cursor nil)
     (map-put! state :insert-cursor nil)))
 
-(defvar agent-shell--markdown-overlay-debounce-delay 0.15
-  "Idle time in seconds before applying markdown overlays during streaming.")
+(defcustom agent-shell-markdown-overlay-debounce-delay 0.15
+  "Idle time in seconds before applying markdown overlays during streaming.
+Lower values keep overlays closer to live but cost more CPU when
+the model emits tokens rapidly.  Raise this on slower terminals
+or when debugging streaming issues."
+  :type 'number
+  :group 'agent-shell)
 
 (defvar-local agent-shell--markdown-overlay-timer nil
   "Idle timer for debounced markdown overlay processing.")
@@ -3064,7 +3069,7 @@ between scheduling and firing."
     (let ((marker-range (agent-shell--range-positions-to-markers range)))
       (setq agent-shell--markdown-overlay-timer
             (run-with-idle-timer
-             agent-shell--markdown-overlay-debounce-delay nil
+             agent-shell-markdown-overlay-debounce-delay nil
              (lambda ()
                (when (buffer-live-p buffer)
                  (with-current-buffer buffer
