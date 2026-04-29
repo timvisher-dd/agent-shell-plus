@@ -25,7 +25,9 @@ When adding or changing features:
 1. **Run `bin/test`.** Set `acp_root` and `shell_maker_root` if the
    deps aren't in sibling worktrees. This runs byte-compilation, ERT
    tests, dependency DAG check, and checks that `README.org` was
-   updated when code changed.
+   updated when code changed. Requires `yq` (`brew install yq`) — the
+   script parses `.github/workflows/ci.yml` to derive the same emacs
+   invocations CI uses.
 2. **Keep the README features list current.** The "Features on top of
    agent-shell" section in `README.org` must be updated whenever code
    changes land. Both `bin/test` and CI enforce this — changes to `.el`
