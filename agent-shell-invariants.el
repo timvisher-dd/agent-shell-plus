@@ -293,8 +293,19 @@ VIOLATIONS is an alist of (check-fn . description)."
         (insert violation-str)
         (insert "\n\n── Markers ──\n\n")
         (insert (format "%S\n" markers))
-        (insert "\n── Buffer Snapshot (first 2000 chars) ──\n\n")
-        (insert (substring buf-snapshot 0 (min (length buf-snapshot) 2000)))
+        (let* ((window 2000)
+               (total (length buf-snapshot)))
+          (cond
+           ((<= total window)
+            (insert (format "\n── Buffer Snapshot (%d chars) ──\n\n" total))
+            (insert buf-snapshot))
+           (t
+            (insert (format "\n── Buffer Snapshot Head (first %d / %d chars) ──\n\n"
+                            window total))
+            (insert (substring buf-snapshot 0 window))
+            (insert (format "\n\n── Buffer Snapshot Tail (last %d / %d chars) ──\n\n"
+                            window total))
+            (insert (substring buf-snapshot (- total window))))))
         (insert "\n\n── Event Log (last ")
         (insert (format "%d" (length (agent-shell-invariants--events))))
         (insert " events) ──\n\n")

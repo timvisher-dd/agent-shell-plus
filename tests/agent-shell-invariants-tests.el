@@ -107,6 +107,55 @@
         (should (string-match-p "Recommended Prompt" (buffer-string))))
       (kill-buffer bundle-buf-name))))
 
+(ert-deftest agent-shell-invariants--on-violation-snapshots-head-and-tail-test ()
+  "Bundle includes both head and tail snippets when buffer exceeds the window.
+The 2000-char window from `point-min' alone misses violations
+that fire near `point-max' on long sessions; both snippets must
+appear in the bundle."
+  (with-temp-buffer
+    (rename-buffer "*agent-shell test-inv-long*" t)
+    ;; Build a buffer with distinctive head and tail markers separated
+    ;; by enough filler that neither end-snippet alone would contain
+    ;; both markers.
+    (insert "HEAD-MARKER ")
+    (insert (make-string 5000 ?x))
+    (insert " TAIL-MARKER")
+    (let ((agent-shell-invariants-enabled t)
+          (agent-shell-invariants--ring nil)
+          (agent-shell-invariants--seq 0)
+          (bundle-buf-name (format "*agent-shell invariant [%s]*"
+                                   (buffer-name))))
+      (agent-shell-invariants--on-violation
+       'long-buffer-trigger
+       '((test-check . "long-buffer test")))
+      (with-current-buffer bundle-buf-name
+        (let ((bundle (buffer-string)))
+          (should (string-match-p "Buffer Snapshot Head" bundle))
+          (should (string-match-p "Buffer Snapshot Tail" bundle))
+          (should (string-match-p "HEAD-MARKER" bundle))
+          (should (string-match-p "TAIL-MARKER" bundle))))
+      (kill-buffer bundle-buf-name))))
+
+(ert-deftest agent-shell-invariants--on-violation-single-snapshot-when-short-test ()
+  "Short buffers fit in a single snapshot section, no head/tail split."
+  (with-temp-buffer
+    (rename-buffer "*agent-shell test-inv-short*" t)
+    (insert "ONLY-MARKER plus a little filler text")
+    (let ((agent-shell-invariants-enabled t)
+          (agent-shell-invariants--ring nil)
+          (agent-shell-invariants--seq 0)
+          (bundle-buf-name (format "*agent-shell invariant [%s]*"
+                                   (buffer-name))))
+      (agent-shell-invariants--on-violation
+       'short-buffer-trigger
+       '((test-check . "short")))
+      (with-current-buffer bundle-buf-name
+        (let ((bundle (buffer-string)))
+          (should (string-match-p "ONLY-MARKER" bundle))
+          (should-not (string-match-p "Snapshot Head" bundle))
+          (should-not (string-match-p "Snapshot Tail" bundle))))
+      (kill-buffer bundle-buf-name))))
+
 ;;; --- Mutation hook tests --------------------------------------------------
 
 (ert-deftest agent-shell-invariants-on-notification-records-event-test ()
