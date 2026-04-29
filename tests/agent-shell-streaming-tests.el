@@ -319,6 +319,140 @@ incremental terminal_output.data chunks, then completed update."
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest agent-shell--mixed-source-output-no-duplication-test ()
+  "Tool output streamed via terminal_output and finalized via _meta.toolResponse must dedup.
+Some agents stream incremental terminal_output.data while in
+progress, then send the full stdout via _meta.toolResponse on the
+final update.  The accumulator must recognize the cumulative
+re-delivery and not re-emit text already present."
+  (let* ((buffer (get-buffer-create " *agent-shell-mixed-source*"))
+         (agent-shell--state (agent-shell--make-state :buffer buffer))
+         (agent-shell--transcript-file nil)
+         (tool-id "call_mixed_source"))
+    (map-put! agent-shell--state :client 'test-client)
+    (map-put! agent-shell--state :request-count 1)
+    (map-put! agent-shell--state :active-requests (list t))
+    (with-current-buffer buffer
+      (erase-buffer)
+      (agent-shell-mode))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell--make-diff-info)
+                   (cl-function (lambda (&key acp-tool-call) (ignore acp-tool-call)))))
+          (with-current-buffer buffer
+            ;; tool_call: in_progress with terminal content placeholder.
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :acp-notification `((method . "session/update")
+                                 (params . ((update
+                                             . ((sessionUpdate . "tool_call")
+                                                (toolCallId . ,tool-id)
+                                                (title . "Run mixed test")
+                                                (kind . "execute")
+                                                (status . "in_progress")
+                                                (content . [((type . "terminal")
+                                                             (terminalId . ,tool-id))])))))))
+            ;; Two streamed terminal_output chunks.
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :acp-notification `((method . "session/update")
+                                 (params . ((update
+                                             . ((sessionUpdate . "tool_call_update")
+                                                (toolCallId . ,tool-id)
+                                                (_meta (terminal_output
+                                                        (terminal_id . ,tool-id)
+                                                        (data . "hello\n")))))))))
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :acp-notification `((method . "session/update")
+                                 (params . ((update
+                                             . ((sessionUpdate . "tool_call_update")
+                                                (toolCallId . ,tool-id)
+                                                (_meta (terminal_output
+                                                        (terminal_id . ,tool-id)
+                                                        (data . "world\n")))))))))
+            ;; Final completed update carries _meta.toolResponse.stdout
+            ;; with the full output (no terminal_output.data this time).
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :acp-notification `((method . "session/update")
+                                 (params . ((update
+                                             . ((sessionUpdate . "tool_call_update")
+                                                (toolCallId . ,tool-id)
+                                                (status . "completed")
+                                                (_meta (claudeCode
+                                                        (toolResponse
+                                                         (stdout . "hello\nworld\n"))))))))))
+            (let* ((buf-text (buffer-substring-no-properties (point-min) (point-max)))
+                   (count-occurrences (lambda (needle)
+                                        (let ((c 0) (s 0))
+                                          (while (string-match (regexp-quote needle) buf-text s)
+                                            (setq c (1+ c) s (match-end 0)))
+                                          c))))
+              (should (string-match-p "hello" buf-text))
+              (should (string-match-p "world" buf-text))
+              (should (= 1 (funcall count-occurrences "hello")))
+              (should (= 1 (funcall count-occurrences "world"))))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest agent-shell--mixed-source-output-extends-with-final-tail-test ()
+  "If _meta.toolResponse on the final update carries text the stream missed, append it."
+  (let* ((buffer (get-buffer-create " *agent-shell-mixed-source-tail*"))
+         (agent-shell--state (agent-shell--make-state :buffer buffer))
+         (agent-shell--transcript-file nil)
+         (tool-id "call_mixed_source_tail"))
+    (map-put! agent-shell--state :client 'test-client)
+    (map-put! agent-shell--state :request-count 1)
+    (map-put! agent-shell--state :active-requests (list t))
+    (with-current-buffer buffer
+      (erase-buffer)
+      (agent-shell-mode))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell--make-diff-info)
+                   (cl-function (lambda (&key acp-tool-call) (ignore acp-tool-call)))))
+          (with-current-buffer buffer
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :acp-notification `((method . "session/update")
+                                 (params . ((update
+                                             . ((sessionUpdate . "tool_call")
+                                                (toolCallId . ,tool-id)
+                                                (title . "Run extends test")
+                                                (kind . "execute")
+                                                (status . "in_progress")
+                                                (content . [((type . "terminal")
+                                                             (terminalId . ,tool-id))])))))))
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :acp-notification `((method . "session/update")
+                                 (params . ((update
+                                             . ((sessionUpdate . "tool_call_update")
+                                                (toolCallId . ,tool-id)
+                                                (_meta (terminal_output
+                                                        (terminal_id . ,tool-id)
+                                                        (data . "first chunk\n")))))))))
+            ;; Final brings the full stdout — the second line was never
+            ;; streamed via terminal_output.
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :acp-notification `((method . "session/update")
+                                 (params . ((update
+                                             . ((sessionUpdate . "tool_call_update")
+                                                (toolCallId . ,tool-id)
+                                                (status . "completed")
+                                                (_meta (claudeCode
+                                                        (toolResponse
+                                                         (stdout . "first chunk\nsecond chunk\n"))))))))))
+            (let ((buf-text (buffer-substring-no-properties (point-min) (point-max))))
+              (should (string-match-p "first chunk" buf-text))
+              (should (string-match-p "second chunk" buf-text))
+              (let ((c 0) (s 0))
+                (while (string-match "first chunk" buf-text s)
+                  (setq c (1+ c) s (match-end 0)))
+                (should (= 1 c))))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 
 ;;; Thought chunk dedup tests
 
