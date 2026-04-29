@@ -9,6 +9,27 @@ root=$(dirname "$0")/..
 tests_dir=${root}/tests
 acp_root=${acp_root:-${root}/../../acp.el/main}
 shell_maker_root=${shell_maker_root:-${root}/../../shell-maker/main}
+# Default markdown_mode_root to the newest elpa-installed copy in the
+# user's Emacs config; override with the env var if checked out elsewhere.
+# Look in both the classic ~/.emacs.d/elpa and the XDG ~/.config/emacs/elpa
+# locations so users on either layout don't need to override.
+if [[ -z ${markdown_mode_root} ]]; then
+  # Pick the newest installed copy locally.  Note: CI pins markdown-mode
+  # to the Package-Requires floor (v2.5) — local runs may pick up a newer
+  # version, so a passing local test isn't a guarantee CI will pass.
+  shopt -s nullglob
+  # Trailing slashes restrict the glob to directories — package archives
+  # also drop sibling files (signatures, READMEs) into elpa/.
+  elpa_markdown_dirs=(
+    "$HOME"/.emacs.d/elpa/markdown-mode-*/
+    "$HOME"/.config/emacs/elpa/markdown-mode-*/
+  )
+  shopt -u nullglob
+  if (( 0 < ${#elpa_markdown_dirs[@]} )); then
+    mapfile -t sorted_elpa < <(printf '%s\n' "${elpa_markdown_dirs[@]}" | sort -V)
+    markdown_mode_root=${sorted_elpa[-1]%/}
+  fi
+fi
 
 if ! [[ -r ${acp_root}/acp.el ]]
 then
@@ -22,6 +43,12 @@ then
   die=1
 fi
 
+if ! [[ -r ${markdown_mode_root}/markdown-mode.el ]]
+then
+  echo "Set markdown_mode_root to your markdown-mode checkout (any version >= 2.5; e.g. ~/.emacs.d/elpa/markdown-mode-2.5)" >&2
+  die=1
+fi
+
 if [[ -n $die ]]
 then
   echo "Fix the ↑ problems" >&2
@@ -29,7 +56,7 @@ then
 fi
 
 shopt -s nullglob
-all_elc_files=({"${root}","${acp_root}","${shell_maker_root}"}/**/*.elc)
+all_elc_files=({"${root}","${acp_root}","${shell_maker_root}","${markdown_mode_root}"}/**/*.elc)
 all_el_files=("${root}"/*.el)
 test_files=("${tests_dir}"/*-tests.el)
 shopt -u nullglob
@@ -67,6 +94,7 @@ emacs -Q --batch \
   -L "${root}" \
   -L "${acp_root}" \
   -L "${shell_maker_root}" \
+  -L "${markdown_mode_root}" \
   -f batch-byte-compile \
   "${compile_files[@]}" ||
   exit
@@ -75,6 +103,7 @@ emacs -Q --batch \
   -L "${root}" \
   -L "${acp_root}" \
   -L "${shell_maker_root}" \
+  -L "${markdown_mode_root}" \
   -L "${tests_dir}" \
   "${test_args[@]}" \
   -f ert-run-tests-batch-and-exit ||
