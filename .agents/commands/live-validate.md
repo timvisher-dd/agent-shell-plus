@@ -54,6 +54,12 @@ happens rather than after the fact):
 When an invariant fires, a `*agent-shell invariant*` buffer pops up
 with a debug bundle and recommended analysis prompt.
 
+The content-store consistency check is O(N · buffer-size) per
+mutation — every notification walks the buffer once for every
+content-store entry.  That's fine for live-validate batch runs
+but unsuitable for normal interactive use; keep
+`agent-shell-invariants-enabled` off outside of debugging.
+
 ## Quick validation one-liner
 
 ```bash

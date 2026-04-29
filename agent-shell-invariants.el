@@ -166,7 +166,13 @@ property with value `body'.  Returns nil if no body section exists."
 
 (defun agent-shell-invariants--check-content-store-consistency ()
   "Verify content-store body length is plausible vs buffer body length.
-Large discrepancies indicate the content-store and buffer diverged."
+Large discrepancies indicate the content-store and buffer diverged.
+
+Cost: O(N · buffer-size) per call — `maphash' over every entry in
+the content store, and each entry walks the buffer from
+`point-min' looking for its qualified-id property.  Acceptable
+for the live-validate workflow this is gated behind, but keep
+`agent-shell-invariants-enabled' off in normal sessions."
   (when agent-shell-ui--content-store
     (let ((violations nil))
       (maphash
