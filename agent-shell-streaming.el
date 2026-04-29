@@ -411,6 +411,16 @@ back to content-text extraction."
                    (concat command-block "\n\n" (string-trim body-text))
                  (string-trim body-text))
          :expanded agent-shell-tool-use-expand-by-default))
+      ;; Clear the per-tool label cache too — the streaming dispatcher
+      ;; uses it to skip redundant rebuilds during in-flight updates.
+      ;; After final, no further updates fire, so the cached values
+      ;; would just linger in state for the lifetime of the shell.
+      (when-let* ((tool-calls (map-elt state :tool-calls))
+                  (entry (map-elt tool-calls .toolCallId)))
+        (setf (map-elt entry :prev-label-left) nil)
+        (setf (map-elt entry :prev-label-right) nil)
+        (setf (map-elt tool-calls .toolCallId) entry)
+        (map-put! state :tool-calls tool-calls))
       (agent-shell--tool-call-clear-output state .toolCallId))))
 
 ;;; Thought chunk dedup
