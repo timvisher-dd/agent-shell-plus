@@ -1577,15 +1577,17 @@ COMMAND, when present, may be a shell command string or an argv vector."
   (map-elt state :active-requests))
 
 (cl-defun agent-shell--on-notification (&key state acp-notification)
-  "Handle incoming ACP-NOTIFICATION using STATE."
+  "Handle incoming ACP-NOTIFICATION using STATE.
+The notification is dropped silently when the shell buffer has been
+killed — handlers downstream assume the buffer is live."
   (when-let* ((buffer (map-elt state :buffer))
               ((buffer-live-p buffer)))
     (with-current-buffer buffer
       (agent-shell-invariants-on-notification
        (or (map-nested-elt acp-notification '(params update sessionUpdate))
            (map-elt acp-notification 'method))
-       (map-nested-elt acp-notification '(params update toolCallId)))))
-  (cond ((equal (map-elt acp-notification 'method) "session/update")
+       (map-nested-elt acp-notification '(params update toolCallId)))
+      (cond ((equal (map-elt acp-notification 'method) "session/update")
          (cond
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "tool_call")
            ;; A tool_call arriving after the session/prompt request
@@ -1879,7 +1881,7 @@ COMMAND, when present, may be a shell command string or an argv vector."
                           (buffer-string)))
           :create-new t
           :navigation 'never)
-         (map-put! state :last-entry-type nil))))
+         (map-put! state :last-entry-type nil))))))
 
 (cl-defun agent-shell--on-request (&key state acp-request)
   "Handle incoming ACP-REQUEST using STATE."

@@ -2529,6 +2529,22 @@ code block content
           (should (equal (buffer-string) "")))
         (kill-buffer log-buf)))))
 
+(ert-deftest agent-shell--on-notification-killed-buffer-test ()
+  "Notifications addressed to a killed shell buffer are dropped silently.
+Handlers downstream call `with-current-buffer' on the same buffer
+and would error if the cond ran outside the live-buffer guard."
+  (let* ((shell-buf (generate-new-buffer "*agent-shell killed-buffer test*"))
+         (state (list (cons :buffer shell-buf))))
+    (kill-buffer shell-buf)
+    (should-not (buffer-live-p shell-buf))
+    ;; Must return nil rather than signalling.
+    (should-not (agent-shell--on-notification
+                 :state state
+                 :acp-notification
+                 '((method . "session/update")
+                   (params . ((update . ((sessionUpdate . "agent_message_chunk")
+                                         (content . ((text . "hi")))))))))) ))
+
 (ert-deftest agent-shell--on-request-sends-error-for-unhandled-method-test ()
   "Test `agent-shell--on-request' responds with an error for unknown methods."
   (with-temp-buffer
