@@ -3937,8 +3937,10 @@ Cancels any existing idle timer first.  After
 `agent-shell-idle-timeout' seconds, emits an `idle' event with
 the original EVENT as :idle-event."
   (agent-shell--cancel-idle-timer)
-  (when-let ((buffer (map-elt (agent-shell--state) :buffer)))
-    (map-put! (agent-shell--state) :idle-timer
+  (when-let ((state (ignore-errors (agent-shell--state)))
+             (buffer (map-elt state :buffer))
+             ((map-contains-key state :idle-timer)))
+    (map-put! state :idle-timer
               (run-at-time (agent-shell-idle-timeout :event event) nil
                            (lambda ()
                              (when (buffer-live-p buffer)
@@ -3952,10 +3954,12 @@ the original EVENT as :idle-event."
 
 (defun agent-shell--cancel-idle-timer ()
   "Cancel any pending idle timer."
-  (when-let ((timer (map-elt (agent-shell--state) :idle-timer))
-             ((timerp timer)))
-    (cancel-timer timer))
-  (map-put! (agent-shell--state) :idle-timer nil))
+  (when-let ((state (ignore-errors (agent-shell--state))))
+    (when-let ((timer (map-elt state :idle-timer))
+               ((timerp timer)))
+      (cancel-timer timer))
+    (when (map-contains-key state :idle-timer)
+      (map-put! state :idle-timer nil))))
 
 ;;; Initialization
 

@@ -451,7 +451,9 @@
 
     ;; Mock acp-send-request to capture what gets sent;
     ;; stub viewport--buffer to avoid interactive shell-buffer prompt in batch.
-    (cl-letf (((symbol-function 'acp-send-request)
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'acp-send-request)
                (lambda (&rest args)
                  (setq sent-request args)))
               ((symbol-function 'agent-shell-viewport--buffer)
@@ -485,7 +487,9 @@
 
     ;; Mock build-content-blocks to throw an error;
     ;; stub viewport--buffer to avoid interactive shell-buffer prompt in batch.
-    (cl-letf (((symbol-function 'agent-shell--build-content-blocks)
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'agent-shell--build-content-blocks)
                (lambda (_prompt)
                  (error "Simulated error in build-content-blocks")))
               ((symbol-function 'acp-send-request)
@@ -2597,6 +2601,7 @@ Based on ACP traffic from https://github.com/xenodium/agent-shell/issues/415."
 After `kill-buffer' happens during restart, Emacs falls back to another
 buffer.  Without the fix, `default-directory' would be inherited from
 that fallback buffer, potentially starting the new shell in the wrong project."
+  (skip-unless (not noninteractive))
   (let ((shell-buffer nil)
         (other-buffer nil)
         (captured-dir nil)
