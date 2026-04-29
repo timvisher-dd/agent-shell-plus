@@ -2545,6 +2545,24 @@ and would error if the cond ran outside the live-buffer guard."
                    (params . ((update . ((sessionUpdate . "agent_message_chunk")
                                          (content . ((text . "hi")))))))))) ))
 
+(ert-deftest agent-shell--schedule-markdown-overlays-survives-buffer-kill-test ()
+  "Idle timer fired after buffer kill must not signal.
+The timer captures the buffer in its closure; the buffer-live-p
+guard inside the timer body short-circuits when the user kills
+the shell before the debounce fires."
+  (let* ((buffer (generate-new-buffer "*agent-shell overlay-kill test*"))
+         (range (with-current-buffer buffer
+                  (insert "hello")
+                  `((:body . ((:start . ,(point-min))
+                              (:end . ,(point-max))))))))
+    (agent-shell--schedule-markdown-overlays buffer range)
+    (let ((timer (with-current-buffer buffer agent-shell--markdown-overlay-timer)))
+      (should (timerp timer))
+      (kill-buffer buffer)
+      (should-not (buffer-live-p buffer))
+      ;; Firing the timer with a dead buffer must not signal.
+      (timer-event-handler timer))))
+
 (ert-deftest agent-shell--on-request-sends-error-for-unhandled-method-test ()
   "Test `agent-shell--on-request' responds with an error for unknown methods."
   (with-temp-buffer
