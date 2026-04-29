@@ -1662,7 +1662,7 @@ COMMAND, when present, may be a shell command string or an argv vector."
                   :label-left  (concat
                                 agent-shell-thought-process-icon
                                 " "
-                                (propertize "Thought process" 'font-lock-face font-lock-doc-markup-face))
+                                (propertize "Thinking" 'font-lock-face font-lock-doc-markup-face))
                   :body delta
                   :append (not new-group)
                   :expanded agent-shell-thought-process-expand-by-default))))

@@ -996,7 +996,7 @@ agent_message_chunk) and asserts every piece appears in the buffer."
               (should (string-match-p "Post-bounce regen content" visible-text))
               ;; Thought chunks and tool calls render under collapsed
               ;; drawers — present in the buffer even though invisible.
-              (should (string-match-p "Thought process" buf-text))
+              (should (string-match-p "Thinking" buf-text))
               (should (string-match-p "post-bounce thought" buf-text))
               (should (string-match-p "Bash" buf-text))
               (should (string-match-p "post-bounce-tool-output" buf-text)))))
