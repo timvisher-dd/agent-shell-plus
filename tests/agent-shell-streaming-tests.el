@@ -495,6 +495,29 @@ must preserve both newlines."
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
         (should (string-match-p "Paragraph one\\.\n.*\n.*Paragraph two" text))))))
 
+(ert-deftest agent-shell-ui-update-fragment-append-caps-boundary-newlines-test ()
+  "Boundary newlines between existing body and appended chunk cap at two.
+When the existing body already ends in newline(s) and the appended chunk
+starts with newline(s), naive concatenation yields three or more
+consecutive newlines (an extra blank line).  Cap the run at two."
+  (with-temp-buffer
+    (let ((inhibit-read-only t))
+      ;; Existing body ends with one trailing \n.
+      (let ((model (list (cons :namespace-id "1")
+                         (cons :block-id "cap")
+                         (cons :label-left "Agent")
+                         (cons :body "First line.\n"))))
+        (agent-shell-ui-update-fragment model :expanded t))
+      ;; Appended chunk leads with two newlines (paragraph break).
+      (let ((model2 (list (cons :namespace-id "1")
+                          (cons :block-id "cap")
+                          (cons :body "\n\nSecond line."))))
+        (agent-shell-ui-update-fragment model2 :append t :expanded t))
+      (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+        ;; Expect exactly two newlines between "First line." and "Second line.".
+        (should (string-match-p "First line\\.\n\nSecond line\\." text))
+        (should-not (string-match-p "First line\\.\n\n\n" text))))))
+
 ;;; Insert-before tests (content above prompt)
 
 (ert-deftest agent-shell-ui-update-fragment-insert-before-test ()
@@ -867,7 +890,12 @@ start of the second get merged: \"pipeline.Full test suite passed\"."
               (should (string-match-p "First paragraph ending\\." visible-text))
               (should (string-match-p "Second paragraph starting\\." visible-text))
               ;; The boundary must include whitespace, not "ending.Second"
-              (should-not (string-match-p "ending\\.Second" visible-text)))))
+              (should-not (string-match-p "ending\\.Second" visible-text))
+              ;; And the boundary must be exactly one blank line (two
+              ;; consecutive newlines) — not a triple-newline regression
+              ;; if the existing chunk already trailed with a newline.
+              (should (string-match-p "ending\\.\n\nSecond paragraph" visible-text))
+              (should-not (string-match-p "ending\\.\n\n\nSecond paragraph" visible-text)))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 

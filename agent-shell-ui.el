@@ -125,6 +125,32 @@ For existing blocks, the current expansion state is preserved unless overridden.
                     ;; breaks, etc.).
                     (when (string-suffix-p "\n\n" body-text)
                       (setq body-text (concat (string-trim-right body-text) "\n\n")))
+                    ;; Cap consecutive newlines at the append boundary
+                    ;; to at most two.  An empty agent_message_chunk is
+                    ;; substituted with "\n\n" upstream to break
+                    ;; paragraphs; if the existing body already ends in
+                    ;; one or more "\n", a naive concat produces three
+                    ;; or more newlines (an extra blank line).
+                    (let* ((trailing-count
+                            (save-excursion
+                              (goto-char old-body-end)
+                              (let ((n 0))
+                                (while (and (< (point-min) (point))
+                                            (eq (char-before) ?\n))
+                                  (cl-incf n)
+                                  (forward-char -1))
+                                n)))
+                           (leading-count
+                            (let ((i 0))
+                              (while (and (< i (length body-text))
+                                          (eq (aref body-text i) ?\n))
+                                (cl-incf i))
+                              i))
+                           (boundary-target (min 2 (max trailing-count leading-count)))
+                           (keep-leading (max 0 (- boundary-target trailing-count))))
+                      (when (< keep-leading leading-count)
+                        (setq body-text (concat (make-string keep-leading ?\n)
+                                                (substring body-text leading-count)))))
                     (if (map-elt state :collapsed)
                         ;; Collapsed: insert-and-inherit picks up invisible
                         ;; from existing body via stickiness.
