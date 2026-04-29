@@ -48,12 +48,18 @@ ln -sfn "$(cd "${shell_maker_root}" && pwd)" deps/shell-maker
 # Adapt a CI run block for local execution:
 # - Replace GitHub PR SHA context with local merge-base equivalents
 # - Translate GitHub Actions ::error:: to plain stderr markers
+#
+# Each substitution is paired with a presence check first.  If the
+# expected literal appears in ci.yml (whitespace included) but the
+# substitution misses it, we bail with a clear error rather than
+# running a half-translated command silently.  This catches drift
+# when ci.yml gets reformatted (extra spaces inside ${{ }}, quoting
+# changes, etc.).  Conversely, if a new ${{ }} expression appears
+# that bin/test doesn't know how to translate, the post-pass scan
+# below catches it.
 adapt_for_local() {
   local cmd="$1"
-  # Replace the two-arg "git diff $base $head" pattern with the @{u}...
-  # three-dot range that the git wrapper expects.  The CI template assigns
-  # base and head then diffs them; locally we collapse that into a single
-  # range expression against the upstream tracking ref.
+  local original="$cmd"
   cmd="${cmd//\$\{\{ github.event.pull_request.base.sha \}\}/\@\{u\}}"
   cmd="${cmd//\$\{\{ github.event.pull_request.head.sha \}\}/}"
   # Collapse the now-empty "$head" arg: "\"$base\" \"$head\"" → "\"$base\""
@@ -64,6 +70,19 @@ adapt_for_local() {
   # Rewrite the two-variable diff into the three-dot range form.
   cmd="${cmd//\"\$base\" \"\$head\"/\"\$base...\"}"
   cmd="${cmd//::error::/ERROR: }"
+  # Drift guard: if ci.yml introduced a ${{ ... }} expression we
+  # don't know how to translate, fail loudly rather than running a
+  # half-substituted command.
+  if [[ "$cmd" == *'${{'* ]]; then
+    {
+      echo "error: adapt_for_local left an untranslated GitHub Actions"
+      echo "       expression in the command — extend bin/test to handle it:"
+      echo "$cmd" | grep -n -F '${{' || true
+      echo "       (original ci.yml block:)"
+      printf '%s\n' "$original"
+    } >&2
+    exit 1
+  fi
   printf '%s' "$cmd"
 }
 
