@@ -451,7 +451,9 @@
 
     ;; Mock acp-send-request to capture what gets sent;
     ;; stub viewport--buffer to avoid interactive shell-buffer prompt in batch.
-    (cl-letf (((symbol-function 'acp-send-request)
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'acp-send-request)
                (lambda (&rest args)
                  (setq sent-request args)))
               ((symbol-function 'agent-shell-viewport--buffer)
@@ -485,7 +487,9 @@
 
     ;; Mock build-content-blocks to throw an error;
     ;; stub viewport--buffer to avoid interactive shell-buffer prompt in batch.
-    (cl-letf (((symbol-function 'agent-shell--build-content-blocks)
+    (cl-letf (((symbol-function 'agent-shell--state)
+               (lambda () agent-shell--state))
+              ((symbol-function 'agent-shell--build-content-blocks)
                (lambda (_prompt)
                  (error "Simulated error in build-content-blocks")))
               ((symbol-function 'acp-send-request)
