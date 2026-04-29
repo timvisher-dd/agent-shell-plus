@@ -83,6 +83,10 @@ jobs:
 
           # Parse (require 'foo) from each file and build an adjacency list.
           # Only track edges where both ends are project-internal.
+          # The regex anchors the (require to whitespace-only line prefix
+          # so semicolon comments and strings can't fake an edge.  It
+          # captures only the first require per line; multi-require lines
+          # are not used in this codebase.
           declare -A edges  # edges["a"]="b c" means a requires b and c
           for f in *.el; do
             mod="${f%.el}"
@@ -91,7 +95,7 @@ jobs:
               if [[ -n "${project_modules[$dep]+x}" ]]; then
                 deps="${deps} ${dep}"
               fi
-            done < <(sed -n "s/^.*(require '\\([a-zA-Z0-9_-]*\\)).*/\\1/p" "$f")
+            done < <(sed -nE "s/^[[:space:]]*\\(require '([a-zA-Z0-9_-]+)\\).*/\\1/p" "$f")
             edges["${mod}"]="${deps}"
           done
 
