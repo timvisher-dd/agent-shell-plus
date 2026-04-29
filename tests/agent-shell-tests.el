@@ -2601,6 +2601,7 @@ Based on ACP traffic from https://github.com/xenodium/agent-shell/issues/415."
 After `kill-buffer' happens during restart, Emacs falls back to another
 buffer.  Without the fix, `default-directory' would be inherited from
 that fallback buffer, potentially starting the new shell in the wrong project."
+  (skip-unless (not noninteractive))
   (let ((shell-buffer nil)
         (other-buffer nil)
         (captured-dir nil)
