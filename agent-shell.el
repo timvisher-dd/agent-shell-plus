@@ -6106,6 +6106,10 @@ Returns an alist with insertion details or nil otherwise:
                 (let ((markdown-overlays-highlight-blocks agent-shell-highlight-blocks)
                       (markdown-overlays-render-images nil))
                   (markdown-overlays-put))))
+            ;; Leave point at the start of the inserted region so the
+            ;; user lands on their context, not after it — DWIM users
+            ;; expect to keep typing where the prompt is, not below
+            ;; the freshly-inserted text.
             (goto-char insert-start)
             (when submit
               (shell-maker-submit)))
