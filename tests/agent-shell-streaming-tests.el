@@ -723,6 +723,43 @@ must appear before the prompt text, not after it."
       (should (string-suffix-p "hello\n\n"
                                (buffer-substring-no-properties (point-min) (point-max)))))))
 
+(ert-deftest agent-shell--mark-tool-calls-cancelled-with-nil-transcript-test ()
+  "Cancelling in-flight tool calls must not signal when transcript-file is nil.
+agent-shell--mark-tool-calls-cancelled invokes handle-tool-call-final
+which appends transcript entries; the transcript helper must tolerate
+a nil file-path or interrupting an unsaved session would crash."
+  (let* ((buffer (get-buffer-create " *agent-shell-cancel-nil-transcript*"))
+         (agent-shell--state (agent-shell--make-state :buffer buffer))
+         (agent-shell--transcript-file nil)
+         (tool-id "toolu_cancel_test"))
+    (map-put! agent-shell--state :client 'test-client)
+    (map-put! agent-shell--state :request-count 1)
+    (map-put! agent-shell--state :active-requests (list t))
+    (with-current-buffer buffer
+      (erase-buffer)
+      (agent-shell-mode))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell--make-diff-info)
+                   (cl-function (lambda (&key acp-tool-call) (ignore acp-tool-call)))))
+          (with-current-buffer buffer
+            ;; Send a tool_call so there's an in-flight entry to cancel.
+            (agent-shell--on-notification
+             :state agent-shell--state
+             :acp-notification `((method . "session/update")
+                                 (params . ((update
+                                             . ((sessionUpdate . "tool_call")
+                                                (toolCallId . ,tool-id)
+                                                (title . "Run cancel test")
+                                                (kind . "execute")
+                                                (status . "pending")))))))
+            ;; Cancel must not signal even with nil transcript-file.
+            (agent-shell--mark-tool-calls-cancelled agent-shell--state)
+            (let ((status (map-nested-elt agent-shell--state
+                                          `(:tool-calls ,tool-id :status))))
+              (should (equal status "cancelled")))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest agent-shell--tool-call-update-overrides-nil-title-test ()
   "Overrides must not signal when existing title is nil.
 When a tool_call_update arrives before the initial tool_call has
