@@ -3062,7 +3062,13 @@ so the range remains valid after buffer modifications."
   "Schedule markdown overlay processing for RANGE in BUFFER at idle time.
 Cancels any pending timer so only the latest range is processed.
 Converts RANGE positions to markers so they track buffer modifications
-between scheduling and firing."
+between scheduling and firing.
+
+If the fragment containing RANGE is rebuilt before the timer fires
+\(label change, full body replacement, etc.), the markers may
+collapse onto a single point — the deleted region is gone.  The
+overlay pass then no-ops on a zero-width region, which is harmless;
+the next streaming chunk schedules a fresh range."
   (with-current-buffer buffer
     (when (timerp agent-shell--markdown-overlay-timer)
       (cancel-timer agent-shell--markdown-overlay-timer))
