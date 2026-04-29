@@ -275,13 +275,15 @@ INCLUDE-CONTENT and INCLUDE-DIFF control optional fields."
     (append (list (cons :status (map-elt update 'status)))
             (when include-content
               (list (cons :content (map-elt update 'content))))
-            (when-let* ((existing-title
-                         (map-nested-elt state
-                                         `(:tool-calls ,(map-elt update 'toolCallId) :title)))
-                        (should-upgrade-title
-                         (string= existing-title "bash"))
-                        (command (map-nested-elt update '(rawInput command))))
-              (list (cons :title command)))
+            ;; The initial tool_call notification often carries a generic
+            ;; title (eg. "Bash", "Read"); a later tool_call_update may
+            ;; supply a more descriptive one (eg. 'grep -i -n "tool"
+            ;; /path/to/file').  Upgrade whenever a non-empty title
+            ;; arrives.  See https://github.com/xenodium/agent-shell/issues/182
+            ;; and https://github.com/xenodium/agent-shell/issues/309.
+            (when-let* ((new-title (map-elt update 'title))
+                        ((not (string-empty-p new-title))))
+              (list (cons :title new-title)))
             (when diff
               (list (cons :diff diff))))))
 

@@ -577,6 +577,34 @@ set a title, the title-upgrade path must not crash on string=."
     (should (listp (agent-shell--tool-call-update-overrides
                     state update nil nil)))))
 
+(ert-deftest agent-shell--tool-call-update-overrides-upgrades-title-test ()
+  "A non-empty title in tool_call_update replaces the existing one.
+Mirrors the non-streaming dispatcher in agent-shell.el so a generic
+initial title (\"Bash\") is upgraded when a richer one arrives."
+  (let* ((state (list (cons :tool-calls
+                            (list (cons "tc-1" (list (cons :title "Bash")
+                                                     (cons :status "pending")))))))
+         (update '((toolCallId . "tc-1")
+                   (status . "in_progress")
+                   (title . "grep -i -n pattern /path/to/file"))))
+    (should (equal "grep -i -n pattern /path/to/file"
+                   (map-elt (agent-shell--tool-call-update-overrides
+                             state update nil nil)
+                            :title)))))
+
+(ert-deftest agent-shell--tool-call-update-overrides-empty-title-test ()
+  "An empty-string title in tool_call_update is ignored.
+Otherwise the existing descriptive title would be clobbered."
+  (let* ((state (list (cons :tool-calls
+                            (list (cons "tc-1" (list (cons :title "Bash")
+                                                     (cons :status "pending")))))))
+         (update '((toolCallId . "tc-1")
+                   (status . "in_progress")
+                   (title . ""))))
+    (should-not (map-elt (agent-shell--tool-call-update-overrides
+                          state update nil nil)
+                         :title))))
+
 ;;; Label status transition tests
 
 (ert-deftest agent-shell--tool-call-update-overrides-uses-correct-keyword-test ()
