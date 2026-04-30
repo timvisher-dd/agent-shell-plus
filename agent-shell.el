@@ -2803,6 +2803,20 @@ variable (see makunbound)"))
       ;; `agent-shell--handle'.  Fire mode hook so initial
       ;; state is available to agent-shell-mode-hook(s).
       (run-hooks 'agent-shell-mode-hook)
+      ;; Refresh the session topic from the agent. `init-finished' fires
+      ;; once the session is established (covers resumed sessions whose
+      ;; title is already known) and `turn-complete' covers ongoing
+      ;; refinement for agents that summarize as the conversation grows.
+      ;; `session-selected' is too early -- it fires synchronously inside
+      ;; `agent-shell--handle' before this subscription can register.
+      (agent-shell-subscribe-to
+       :shell-buffer shell-buffer
+       :event 'init-finished
+       :on-event #'agent-shell--refresh-topic-from-session-list)
+      (agent-shell-subscribe-to
+       :shell-buffer shell-buffer
+       :event 'turn-complete
+       :on-event #'agent-shell--refresh-topic-from-session-list)
       ;; Subscribe to session selection events (needed regardless of focus).
       (when (eq agent-shell-session-strategy 'prompt)
         (agent-shell-subscribe-to
@@ -3678,6 +3692,8 @@ Session events:
     :data contains :request-id, :tool-call-id, :option-id, :cancelled
   `turn-complete'       - Agent turn finished and prompt ready for input
     :data contains :stop-reason and :usage
+  `topic-changed'       - Session topic updated (first prompt or refined title)
+    :data contains :topic
   `input-submitted'     - User submitted input to the agent
   `idle'                - Agent idle for `agent-shell-idle-timeout' seconds
     :data contains :idle-event and :buffer
@@ -4791,6 +4807,43 @@ If FILE-PATH is not an image, returns nil."
                     "\n")
    :create-new t))
 
+(defun agent-shell--set-topic (topic)
+  "Set the current session's topic to TOPIC and emit `topic-changed'.
+Does nothing if TOPIC is empty or matches the current value.
+Rebuilds the session alist (rather than `map-put!') because :topic
+may be a new key not yet present in the alist."
+  (when (and (stringp topic) (not (string-empty-p topic)))
+    (when-let ((session (map-elt agent-shell--state :session)))
+      (unless (equal (map-elt session :topic) topic)
+        (map-put! agent-shell--state :session
+                  (cons (cons :topic topic)
+                        (assq-delete-all :topic session)))
+        (agent-shell--emit-event :event 'topic-changed
+                                 :data `(:topic ,topic))))))
+
+(defun agent-shell--refresh-topic-from-session-list (&optional _event)
+  "Refresh `(:session :topic)' from the agent's session/list metadata.
+Sends a `session/list' ACP request and writes any non-empty `title'
+field on the matching session via `agent-shell--set-topic'.  Agents
+that don't supply a title (e.g. Claude Code) are no-ops; the seeded
+first-prompt topic is left in place."
+  (when-let* ((client (map-elt agent-shell--state :client))
+              (session-id (map-nested-elt agent-shell--state '(:session :id)))
+              (cwd (agent-shell--resolve-path default-directory)))
+    (acp-send-request
+     :client client
+     :request (acp-make-session-list-request :cwd cwd)
+     :buffer (current-buffer)
+     :on-success
+     (lambda (resp)
+       (when-let* ((sessions (append (or (map-elt resp 'sessions) '()) nil))
+                   (current (seq-find
+                             (lambda (s) (equal (map-elt s 'sessionId) session-id))
+                             sessions))
+                   (title (map-elt current 'title)))
+         (agent-shell--set-topic title)))
+     :on-failure (lambda (&rest _) nil))))
+
 (cl-defun agent-shell--send-command (&key prompt shell-buffer)
   "Send PROMPT to agent using SHELL-BUFFER."
   (let* ((content-blocks (condition-case nil
@@ -4808,6 +4861,12 @@ If FILE-PATH is not an image, returns nil."
     (agent-shell--emit-event :event 'input-submitted)
 
     (map-put! agent-shell--state :last-entry-type nil)
+
+    ;; Seed the session topic with the first user prompt so consumers
+    ;; (e.g. agent-shell-manager) have something to display before any
+    ;; agent-supplied title arrives.
+    (unless (map-nested-elt agent-shell--state '(:session :topic))
+      (agent-shell--set-topic (substring-no-properties prompt)))
 
     (agent-shell--append-transcript
      :text (format "## User (%s)\n\n%s\n\n"
