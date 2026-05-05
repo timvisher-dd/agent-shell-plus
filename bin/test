@@ -3,14 +3,39 @@
 # If CI steps change, this script automatically picks them up.
 #
 # Local adaptations:
-# - Dependencies (acp.el, shell-maker) are symlinked into deps/ from
-#   local worktree checkouts instead of being cloned by GitHub Actions.
-#   Override locations with acp_root and shell_maker_root env vars.
+# - Dependencies (acp.el, shell-maker, markdown-mode) are symlinked into
+#   deps/ from local worktree or elpa checkouts instead of being cloned
+#   by GitHub Actions.  Override locations with acp_root, shell_maker_root,
+#   and markdown_mode_root env vars.
 # - GitHub ${{ }} context variables are replaced with local git equivalents.
 # - GitHub Actions ::error:: annotations are translated to stderr messages.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
+
+# Default markdown_mode_root to the newest elpa-installed copy in the
+# user's Emacs config; override with the env var if checked out elsewhere.
+# Look in both the classic ~/.emacs.d/elpa and the XDG ~/.config/emacs/elpa
+# locations so users on either layout don't need to override.
+if [[ -z ${markdown_mode_root:-} ]]
+then
+  # Pick the newest installed copy locally.  Note: CI pins markdown-mode
+  # to the Package-Requires floor (v2.5) — local runs may pick up a newer
+  # version, so a passing local test isn't a guarantee CI will pass.
+  shopt -s nullglob
+  # Trailing slashes restrict the glob to directories — package archives
+  # also drop sibling files (signatures, READMEs) into elpa/.
+  elpa_markdown_dirs=(
+    "$HOME"/.emacs.d/elpa/markdown-mode-*/
+    "$HOME"/.config/emacs/elpa/markdown-mode-*/
+  )
+  shopt -u nullglob
+  if (( 0 < ${#elpa_markdown_dirs[@]} ))
+  then
+    mapfile -t sorted_elpa < <(printf '%s\n' "${elpa_markdown_dirs[@]}" | sort -V)
+    markdown_mode_root=${sorted_elpa[-1]%/}
+  fi
+fi
 
 ci_yaml=".github/workflows/ci.yml"
 
@@ -36,6 +61,13 @@ if ! [[ -r ${shell_maker_root}/shell-maker.el ]]; then
   die=1
 fi
 
+if ! [[ -r ${markdown_mode_root:-}/markdown-mode.el ]]
+then
+  echo "error: markdown-mode.el not found at ${markdown_mode_root:-<unset>}" >&2
+  echo "Set markdown_mode_root to your markdown-mode checkout (any version >= 2.5; e.g. ~/.emacs.d/elpa/markdown-mode-2.5)" >&2
+  die=1
+fi
+
 if (( 0 < die )); then
   exit 1
 fi
@@ -44,6 +76,7 @@ fi
 mkdir -p deps
 ln -sfn "$(cd "${acp_root}" && pwd)" deps/acp.el
 ln -sfn "$(cd "${shell_maker_root}" && pwd)" deps/shell-maker
+ln -sfn "$(cd "${markdown_mode_root}" && pwd)" deps/markdown-mode
 
 # Adapt a CI run block for local execution:
 # - Replace GitHub PR SHA context with local merge-base equivalents

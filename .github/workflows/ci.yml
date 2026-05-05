@@ -150,6 +150,15 @@ jobs:
           repository: xenodium/shell-maker
           path: deps/shell-maker
 
+      # Pin to the Package-Requires floor (v2.5) so CI catches code that
+      # silently depends on a newer markdown-mode.  bin/test auto-discovers
+      # whatever's installed locally and may pick up something newer.
+      - uses: actions/checkout@v4
+        with:
+          repository: jrblevin/markdown-mode
+          ref: v2.5
+          path: deps/markdown-mode
+
       - uses: purcell/setup-emacs@master
         with:
           version: 29.4
@@ -164,7 +173,7 @@ jobs:
             case "$f" in x.*|y.*|z.*) ;; *) compile_files+=("$f") ;; esac
           done
           emacs -Q --batch \
-            -L . -L deps/acp.el -L deps/shell-maker \
+            -L . -L deps/acp.el -L deps/shell-maker -L deps/markdown-mode \
             -f batch-byte-compile \
             "${compile_files[@]}"
 
@@ -175,6 +184,6 @@ jobs:
             test_args+=(-l "$f")
           done
           emacs -Q --batch \
-            -L . -L deps/acp.el -L deps/shell-maker -L tests \
+            -L . -L deps/acp.el -L deps/shell-maker -L deps/markdown-mode -L tests \
             "${test_args[@]}" \
             -f ert-run-tests-batch-and-exit

@@ -5,7 +5,7 @@
 ;; Author: Alvaro Ramirez https://xenodium.com
 ;; URL: https://github.com/xenodium/agent-shell
 ;; Version: 0.50.1
-;; Package-Requires: ((emacs "29.1") (shell-maker "0.90.1") (acp "0.11.1"))
+;; Package-Requires: ((emacs "29.1") (shell-maker "0.90.1") (acp "0.11.1") (markdown-mode "2.5"))
 
 (defconst agent-shell--version "0.50.1")
 
@@ -46,6 +46,7 @@
 (require 'diff)
 (require 'json)
 (require 'map)
+(require 'markdown-mode)
 (unless (require 'markdown-overlays nil 'noerror)
   (error "Please update 'shell-maker' to v0.90.1 or newer"))
 (require 'agent-shell-invariants)
@@ -7202,22 +7203,28 @@ Remove: M-x agent-shell-remove-pending-request
               (append pending (list prompt)))
     (message "Request queued (%d pending)" (length (map-elt agent-shell--state :pending-requests)))))
 
-(defun agent-shell-queue-request (prompt)
+(defun agent-shell-queue-request (&optional prompt)
   "Queue or immediately send a request depending on shell busy state.
 
-Read PROMPT from the minibuffer.  If the shell is busy, add it to the pending
-requests queue.  Otherwise, submit it immediately.  Queued requests will be
-automatically sent when the current request completes."
-  (interactive
-   (progn
-     (unless (derived-mode-p 'agent-shell-mode)
-       (error "Not in a shell"))
-     (list (read-string (or (map-nested-elt (agent-shell--state) '(:agent-config :shell-prompt))
-                            "Enqueue request: ")))))
-  (agent-shell--idle-notification-cancel)
-  (if (shell-maker-busy)
-      (agent-shell--enqueue-request :prompt prompt)
-    (agent-shell--insert-to-shell-buffer :text prompt :submit t :no-focus t)))
+Interactively, pop a `gfm-mode' compose buffer; submit on
+\\<agent-shell-queue-compose-mode-map>\\[agent-shell-queue-compose-submit].
+If the shell is busy when submitted, add to the pending requests
+queue; otherwise submit immediately.  Queued requests will be
+automatically sent when the current request completes.
+
+When called non-interactively with PROMPT, submit or queue
+PROMPT directly, bypassing the compose buffer."
+  (declare (modes agent-shell-mode))
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Not in a shell"))
+  (cond
+   ((not prompt)
+    (agent-shell-queue-compose-pop (current-buffer)))
+   ((string-empty-p (string-trim prompt))
+    (user-error "PROMPT is empty"))
+   (t
+    (agent-shell--queue-or-submit prompt (current-buffer)))))
 
 (defun agent-shell-resume-pending-requests ()
   "Resume processing pending requests in the queue."
@@ -7267,6 +7274,133 @@ or select a specific request to remove."
                             (length (map-elt agent-shell--state :pending-requests))))
       (map-put! agent-shell--state :pending-requests nil)
       (message "Removed all pending requests"))))
+
+;;; Queue compose
+
+(defvar-local agent-shell-queue-compose--shell-buffer nil
+  "Originating agent-shell buffer this compose buffer submits to.")
+
+(defvar-local agent-shell--queue-compose-buffer nil
+  "Compose buffer associated with this shell buffer, if any.")
+
+(defvar agent-shell-queue-compose-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'agent-shell-queue-compose-submit)
+    (define-key map (kbd "C-c C-k") #'agent-shell-queue-compose-cancel)
+    map)
+  "Keymap for `agent-shell-queue-compose-mode'.")
+
+(define-minor-mode agent-shell-queue-compose-mode
+  "Minor mode for the agent-shell queue-request compose buffer.
+
+Layered on top of `gfm-mode' so its keymap takes precedence over the
+major-mode bindings.
+
+\\{agent-shell-queue-compose-mode-map}"
+  :lighter " ASQCompose"
+  :keymap agent-shell-queue-compose-mode-map)
+
+(defun agent-shell--queue-or-submit (prompt shell-buffer)
+  "Queue PROMPT or submit it to SHELL-BUFFER depending on busy state.
+
+The submit branch's `agent-shell--insert-to-shell-buffer' cancels
+any active idle notification itself; the busy branch can't have
+one active because the notification only fires when the shell is
+idle."
+  (unless (buffer-live-p shell-buffer)
+    (user-error "Shell buffer is not live"))
+  (with-current-buffer shell-buffer
+    (if (shell-maker-busy)
+        (agent-shell--enqueue-request :prompt prompt)
+      (agent-shell--insert-to-shell-buffer
+       :shell-buffer shell-buffer :text prompt :submit t :no-focus t))))
+
+(defun agent-shell-queue-compose-pop (shell-buffer)
+  "Pop a `gfm-mode' compose buffer bound to SHELL-BUFFER.
+
+Reuses the shell's existing compose buffer when alive so an
+in-progress draft survives a re-invocation."
+  (unless (buffer-live-p shell-buffer)
+    (user-error "Shell buffer is not live"))
+  (let* ((existing (buffer-local-value 'agent-shell--queue-compose-buffer
+                                       shell-buffer))
+         ;; Strip leading/trailing asterisks from the shell name so the
+         ;; compose buffer doesn't render as `*…: *shell**`.
+         (shell-stem (string-trim (buffer-name shell-buffer) "\\*+" "\\*+"))
+         (buffer (if (buffer-live-p existing)
+                     (with-current-buffer existing
+                       ;; Reset modified flag on reuse so the modeline
+                       ;; doesn't carry the `**' indicator from a kept
+                       ;; draft into the next session.
+                       (set-buffer-modified-p nil)
+                       existing)
+                   (let ((new (generate-new-buffer
+                               (format "*agent-shell-queue-compose: %s*" shell-stem))))
+                     (with-current-buffer new
+                       (gfm-mode)
+                       (agent-shell-queue-compose-mode 1)
+                       (setq agent-shell-queue-compose--shell-buffer shell-buffer)
+                       (add-hook 'kill-buffer-hook
+                                 #'agent-shell-queue-compose--clear-shell-ref
+                                 nil t)
+                       (setq header-line-format
+                             (substitute-command-keys
+                              "Compose request — \\[agent-shell-queue-compose-submit] queue/submit · \\[agent-shell-queue-compose-cancel] cancel"))
+                       (set-buffer-modified-p nil))
+                     (with-current-buffer shell-buffer
+                       (setq agent-shell--queue-compose-buffer new))
+                     new))))
+    (pop-to-buffer buffer)
+    buffer))
+
+(defun agent-shell-queue-compose--clear-shell-ref ()
+  "Clear the originating shell's compose-buffer pointer.
+Run from `kill-buffer-hook' on the compose buffer so a killed
+buffer doesn't leave a stale reference behind."
+  (let ((shell-buffer agent-shell-queue-compose--shell-buffer)
+        (this-buffer (current-buffer)))
+    (when (buffer-live-p shell-buffer)
+      (with-current-buffer shell-buffer
+        (when (eq agent-shell--queue-compose-buffer this-buffer)
+          (setq agent-shell--queue-compose-buffer nil))))))
+
+(defun agent-shell-queue-compose--quit-or-kill ()
+  "Kill the compose buffer, also quitting its window when displayed.
+`quit-window t' kills the buffer and restores the previous window
+state; if the buffer isn't currently displayed (e.g. invoked via
+\\[execute-extended-command] after switching away), `quit-window'
+would pick an arbitrary window — fall back to plain `kill-buffer'."
+  (if (get-buffer-window (current-buffer) t)
+      (quit-window t)
+    (kill-buffer (current-buffer))))
+
+(defun agent-shell-queue-compose-submit ()
+  "Submit (or queue) the contents of the compose buffer."
+  (interactive)
+  (unless agent-shell-queue-compose-mode
+    (user-error "Not in an agent-shell compose buffer"))
+  (let ((shell-buffer agent-shell-queue-compose--shell-buffer)
+        (prompt (buffer-string)))
+    (when (string-empty-p (string-trim prompt))
+      (user-error "Compose buffer is empty"))
+    (unless (buffer-live-p shell-buffer)
+      (user-error "Originating shell buffer is no longer live"))
+    (agent-shell--queue-or-submit prompt shell-buffer)
+    (agent-shell-queue-compose--quit-or-kill)))
+
+(defun agent-shell-queue-compose-cancel ()
+  "Cancel the compose buffer.
+
+Kills silently when the buffer is empty and unmodified; otherwise asks
+for confirmation."
+  (interactive)
+  (unless agent-shell-queue-compose-mode
+    (user-error "Not in an agent-shell compose buffer"))
+  (if (or (and (zerop (buffer-size))
+               (not (buffer-modified-p)))
+          (y-or-n-p "Discard compose buffer? "))
+      (agent-shell-queue-compose--quit-or-kill)
+    (message "Kept draft")))
 
 (provide 'agent-shell)
 

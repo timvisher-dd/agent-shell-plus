@@ -25,6 +25,7 @@ A soft fork of [[https://github.com/xenodium/agent-shell][agent-shell]] with ext
 - Tunable markdown-overlay debounce via =agent-shell-markdown-overlay-debounce-delay= (default 0.15s) for slow terminals or streaming-debug sessions
 - Bug fix for upstream =shell-maker-define-major-mode= mode-map quoting — without it, every =agent-shell-mode= invocation emits =void-function keymap= because the bare keymap value gets spliced into a backquote that re-evaluates =(keymap ...)= as a function call (worth upstreaming separately)
 - Live-validate workflow doc (=.agents/commands/live-validate.md=) describing the batch-mode rendering verification used for rendering-pipeline changes
+- =gfm-mode= compose buffer for the interactive =agent-shell-queue-request=, replacing the read-string minibuffer prompt (non-interactive callers still pass =PROMPT= directly)
 
 -----
 
@@ -781,6 +782,9 @@ always go to Evil modes if you need to with ~C-z~).
 |                 | agent-shell-anthropic-start-claude-code                 | Start an interactive Claude Agent shell.                                      |
 |                 | agent-shell-auggie-start-agent                          | Start an interactive Auggie agent shell.                                      |
 |                 | agent-shell-clear-buffer                                | Clear the current shell buffer.                                               |
+|                 | agent-shell-queue-compose-cancel                        | Cancel the compose buffer (asks confirmation when modified).                  |
+|                 | agent-shell-queue-compose-mode                          | Minor mode for the agent-shell queue-request compose buffer.                  |
+|                 | agent-shell-queue-compose-submit                        | Submit (or queue) the contents of the compose buffer.                         |
 |                 | agent-shell-completion-mode                             | Toggle agent shell completion with @ or / prefix.                             |
 |                 | agent-shell-cursor-start-agent                          | Start an interactive Cursor agent shell.                                      |
 | C-<tab>         | agent-shell-cycle-session-mode                          | Cycle through available session modes for the current `agent-shell' session.  |
@@ -810,7 +814,7 @@ always go to Evil modes if you need to with ~C-z~).
 | p or <backtab>  | agent-shell-previous-item                               | Go to previous item.                                                          |
 |                 | agent-shell-previous-permission-button                  | Jump to the previous button.                                                  |
 |                 | agent-shell-prompt-compose                              | Compose an `agent-shell' prompt in a dedicated buffer.                        |
-|                 | agent-shell-queue-request                               | Queue or immediately send a request depending on shell busy state.            |
+|                 | agent-shell-queue-request                               | Compose (interactive) or send PROMPT (non-interactive) — busy-aware.          |
 |                 | agent-shell-qwen-start                                  | Start an interactive Qwen Code CLI agent shell.                               |
 |                 | agent-shell-remove-pending-request                      | Remove all pending requests or a specific request by REMOVE-INDEX.            |
 | C-x x r         | agent-shell-rename-buffer                               | Rename current shell buffer.                                                  |

@@ -2707,6 +2707,8 @@ Based on ACP traffic from https://github.com/xenodium/agent-shell/issues/415."
 After `kill-buffer' happens during restart, Emacs falls back to another
 buffer.  Without the fix, `default-directory' would be inherited from
 that fallback buffer, potentially starting the new shell in the wrong project."
+  ;; `make-frame' below requires a real terminal, so this test cannot
+  ;; run in batch mode where Emacs has no controlling terminal.
   (skip-unless (not noninteractive))
   (let ((shell-buffer nil)
         (other-buffer nil)
@@ -2892,6 +2894,281 @@ Asserts:
 (defun hello ()
   (message \"world\"))
 ```"))
+
+;;; Queue-compose-buffer tests
+
+(defmacro agent-shell-tests--with-compose (shell-var compose-var &rest body)
+  "Run BODY with a fresh shell-buffer in SHELL-VAR and compose-buffer in COMPOSE-VAR.
+
+Stubs `pop-to-buffer' to avoid display side-effects in batch mode."
+  (declare (indent 2))
+  `(let ((,shell-var (generate-new-buffer "*test-shell*"))
+         ,compose-var)
+     (unwind-protect
+         (cl-letf (((symbol-function 'pop-to-buffer) (lambda (b &rest _) b)))
+           (with-current-buffer ,shell-var
+             (setq major-mode 'agent-shell-mode))
+           (setq ,compose-var (agent-shell-queue-compose-pop ,shell-var))
+           ,@body)
+       (when (buffer-live-p ,compose-var) (kill-buffer ,compose-var))
+       (when (buffer-live-p ,shell-var) (kill-buffer ,shell-var)))))
+
+(ert-deftest agent-shell-queue-compose-pop-creates-buffer-with-modes-and-tracking ()
+  "`agent-shell-queue-compose-pop' sets up gfm-mode + compose-mode and links shell↔compose."
+  (agent-shell-tests--with-compose shell compose
+    (should (buffer-live-p compose))
+    (with-current-buffer compose
+      (should (derived-mode-p 'gfm-mode))
+      (should agent-shell-queue-compose-mode)
+      (should (eq agent-shell-queue-compose--shell-buffer shell))
+      (should header-line-format)
+      (should-not (buffer-modified-p)))
+    (should (eq (buffer-local-value 'agent-shell--queue-compose-buffer shell)
+                compose))))
+
+(ert-deftest agent-shell-queue-compose-pop-reuses-buffer-and-preserves-draft ()
+  "Re-popping for the same shell returns the same buffer with draft intact."
+  (agent-shell-tests--with-compose shell compose
+    (with-current-buffer compose
+      (insert "draft content"))
+    (let ((reused (agent-shell-queue-compose-pop shell)))
+      (should (eq compose reused))
+      (with-current-buffer reused
+        (should (string= "draft content" (buffer-string)))))))
+
+(ert-deftest agent-shell-queue-compose-pop-errors-on-dead-shell ()
+  "`agent-shell-queue-compose-pop' refuses to pop for a killed shell buffer."
+  (let ((dead (generate-new-buffer "*test-shell-dead*")))
+    (kill-buffer dead)
+    (should-error (agent-shell-queue-compose-pop dead) :type 'user-error)))
+
+(ert-deftest agent-shell--queue-or-submit-errors-on-dead-shell ()
+  "`agent-shell--queue-or-submit' guards against a dead originating shell."
+  (let ((dead (generate-new-buffer "*test-shell-dead*")))
+    (kill-buffer dead)
+    (should-error (agent-shell--queue-or-submit "hi" dead) :type 'user-error)))
+
+(ert-deftest agent-shell--queue-or-submit-enqueues-when-busy ()
+  "When the shell is busy, `agent-shell--queue-or-submit' enqueues."
+  (let ((shell (generate-new-buffer "*test-shell*"))
+        enqueued
+        inserted)
+    (unwind-protect
+        (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+                  ((symbol-function 'agent-shell--idle-notification-cancel)
+                   #'ignore)
+                  ((symbol-function 'agent-shell--enqueue-request)
+                   (lambda (&rest args) (setq enqueued args)))
+                  ((symbol-function 'agent-shell--insert-to-shell-buffer)
+                   (lambda (&rest args) (setq inserted args))))
+          (agent-shell--queue-or-submit "hi" shell))
+      (kill-buffer shell))
+    (should (equal enqueued '(:prompt "hi")))
+    (should (null inserted))))
+
+(ert-deftest agent-shell--queue-or-submit-submits-when-idle ()
+  "When the shell is idle, `agent-shell--queue-or-submit' submits directly."
+  (let ((shell (generate-new-buffer "*test-shell*"))
+        enqueued
+        inserted)
+    (unwind-protect
+        (cl-letf (((symbol-function 'shell-maker-busy) (lambda () nil))
+                  ((symbol-function 'agent-shell--idle-notification-cancel)
+                   #'ignore)
+                  ((symbol-function 'agent-shell--enqueue-request)
+                   (lambda (&rest args) (setq enqueued args)))
+                  ((symbol-function 'agent-shell--insert-to-shell-buffer)
+                   (lambda (&rest args) (setq inserted args))))
+          (agent-shell--queue-or-submit "hi" shell))
+      (kill-buffer shell))
+    (should (equal inserted (list :shell-buffer shell
+                                  :text "hi"
+                                  :submit t
+                                  :no-focus t)))
+    (should (null enqueued))))
+
+(ert-deftest agent-shell-queue-compose-submit-errors-when-not-in-compose-mode ()
+  "`agent-shell-queue-compose-submit' refuses to run outside a compose buffer."
+  (with-temp-buffer
+    (should-error (agent-shell-queue-compose-submit) :type 'user-error)))
+
+(ert-deftest agent-shell-queue-compose-submit-errors-on-empty-buffer ()
+  "An empty compose buffer signals a `user-error' rather than submitting."
+  (agent-shell-tests--with-compose shell compose
+    (with-current-buffer compose
+      (should-error (agent-shell-queue-compose-submit) :type 'user-error))))
+
+(ert-deftest agent-shell-queue-compose-submit-errors-on-dead-shell ()
+  "Submitting after the originating shell dies raises a `user-error'."
+  (agent-shell-tests--with-compose shell compose
+    (with-current-buffer compose
+      (insert "hi"))
+    (kill-buffer shell)
+    (with-current-buffer compose
+      (should-error (agent-shell-queue-compose-submit) :type 'user-error))))
+
+(ert-deftest agent-shell-queue-compose-submit-dispatches-and-kills-buffer ()
+  "Submit hands raw prompt to `agent-shell--queue-or-submit' and kills the buffer."
+  (let (submitted)
+    (agent-shell-tests--with-compose shell compose
+      (cl-letf (((symbol-function 'agent-shell--queue-or-submit)
+                 (lambda (prompt sb) (setq submitted (list prompt sb))))
+                ((symbol-function 'quit-window)
+                 (lambda (&rest _) (kill-buffer compose))))
+        (with-current-buffer compose
+          (insert "  hello world  ")
+          (agent-shell-queue-compose-submit)))
+      (should (equal submitted (list "  hello world  " shell)))
+      (should-not (buffer-live-p compose)))))
+
+(ert-deftest agent-shell-queue-compose-cancel-silently-kills-empty-unmodified ()
+  "Cancelling an empty unmodified buffer kills it without prompting."
+  (agent-shell-tests--with-compose shell compose
+    (cl-letf (((symbol-function 'y-or-n-p)
+               (lambda (&rest _) (error "should not prompt")))
+              ((symbol-function 'quit-window)
+               (lambda (&rest _) (kill-buffer compose))))
+      (with-current-buffer compose
+        (agent-shell-queue-compose-cancel)))
+    (should-not (buffer-live-p compose))))
+
+(ert-deftest agent-shell-queue-compose-cancel-keeps-buffer-when-declined ()
+  "Declining the discard prompt leaves the buffer alive with content intact."
+  (agent-shell-tests--with-compose shell compose
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) nil)))
+      (with-current-buffer compose
+        (insert "draft")
+        (agent-shell-queue-compose-cancel)))
+    (should (buffer-live-p compose))
+    (with-current-buffer compose
+      (should (string= "draft" (buffer-string))))))
+
+(ert-deftest agent-shell-queue-compose-cancel-discards-when-confirmed ()
+  "Confirming the discard prompt kills the buffer."
+  (agent-shell-tests--with-compose shell compose
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
+              ((symbol-function 'quit-window)
+               (lambda (&rest _) (kill-buffer compose))))
+      (with-current-buffer compose
+        (insert "draft")
+        (agent-shell-queue-compose-cancel)))
+    (should-not (buffer-live-p compose))))
+
+(ert-deftest agent-shell-queue-request-errors-when-not-in-shell ()
+  "`agent-shell-queue-request' raises a `user-error' outside agent-shell-mode."
+  (with-temp-buffer
+    (should-error (agent-shell-queue-request) :type 'user-error)))
+
+(ert-deftest agent-shell-queue-request-non-interactive-bypasses-compose ()
+  "Calling with PROMPT submits directly, skipping compose."
+  (let ((shell (generate-new-buffer "*test-shell*"))
+        submitted
+        popped)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell--queue-or-submit)
+                   (lambda (p sb) (setq submitted (list p sb))))
+                  ((symbol-function 'agent-shell-queue-compose-pop)
+                   (lambda (sb) (setq popped sb))))
+          (with-current-buffer shell
+            (setq major-mode 'agent-shell-mode)
+            (agent-shell-queue-request "direct prompt")))
+      (kill-buffer shell))
+    (should (equal submitted (list "direct prompt" shell)))
+    (should (null popped))))
+
+(ert-deftest agent-shell-queue-request-without-prompt-pops-compose ()
+  "Calling without PROMPT pops the compose buffer."
+  (let ((shell (generate-new-buffer "*test-shell*"))
+        submitted
+        popped)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell--queue-or-submit)
+                   (lambda (p sb) (setq submitted (list p sb))))
+                  ((symbol-function 'agent-shell-queue-compose-pop)
+                   (lambda (sb) (setq popped sb))))
+          (with-current-buffer shell
+            (setq major-mode 'agent-shell-mode)
+            (agent-shell-queue-request)))
+      (kill-buffer shell))
+    (should (eq popped shell))
+    (should (null submitted))))
+
+(ert-deftest agent-shell-queue-compose-pop-after-submit-creates-fresh-buffer ()
+  "After submit kills the compose buffer, re-popping must create a new one."
+  (agent-shell-tests--with-compose shell first
+    (cl-letf (((symbol-function 'agent-shell--queue-or-submit) #'ignore))
+      (with-current-buffer first
+        (insert "send me")
+        (agent-shell-queue-compose-submit)))
+    (should-not (buffer-live-p first))
+    (let ((second (agent-shell-queue-compose-pop shell)))
+      (unwind-protect
+          (progn
+            (should (buffer-live-p second))
+            (should-not (eq second first))
+            (should (eq (buffer-local-value 'agent-shell--queue-compose-buffer
+                                            shell)
+                        second)))
+        (when (buffer-live-p second) (kill-buffer second))))))
+
+(ert-deftest agent-shell-queue-request-rejects-empty-prompt ()
+  "Non-interactive `agent-shell-queue-request' rejects whitespace-only PROMPT."
+  (let ((shell (generate-new-buffer "*test-shell*")))
+    (unwind-protect
+        (with-current-buffer shell
+          (setq major-mode 'agent-shell-mode)
+          (should-error (agent-shell-queue-request "") :type 'user-error)
+          (should-error (agent-shell-queue-request "   \n\t") :type 'user-error))
+      (kill-buffer shell))))
+
+(ert-deftest agent-shell-queue-compose-submit-end-to-end-busy-enqueues ()
+  "Compose → submit → busy shell → enqueue (no stub of queue-or-submit)."
+  (let (enqueued inserted)
+    (agent-shell-tests--with-compose shell compose
+      (cl-letf (((symbol-function 'shell-maker-busy) (lambda () t))
+                ((symbol-function 'agent-shell--enqueue-request)
+                 (lambda (&rest args) (setq enqueued args)))
+                ((symbol-function 'agent-shell--insert-to-shell-buffer)
+                 (lambda (&rest args) (setq inserted args))))
+        (with-current-buffer compose
+          (insert "draft text")
+          (agent-shell-queue-compose-submit))))
+    (should (equal enqueued '(:prompt "draft text")))
+    (should (null inserted))))
+
+(ert-deftest agent-shell-queue-compose-mode-map-bindings ()
+  "C-c C-c → submit, C-c C-k → cancel — keymap is the user contract."
+  (should (eq (lookup-key agent-shell-queue-compose-mode-map (kbd "C-c C-c"))
+              #'agent-shell-queue-compose-submit))
+  (should (eq (lookup-key agent-shell-queue-compose-mode-map (kbd "C-c C-k"))
+              #'agent-shell-queue-compose-cancel)))
+
+(ert-deftest agent-shell-queue-compose--quit-or-kill-quits-window-when-displayed ()
+  "When the compose buffer is in a window, prefer `quit-window t'."
+  (let (quit-args killed)
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'get-buffer-window)
+                 (lambda (&rest _) 'fake-window))
+                ((symbol-function 'quit-window)
+                 (lambda (&rest args) (setq quit-args args)))
+                ((symbol-function 'kill-buffer)
+                 (lambda (&rest _) (setq killed t))))
+        (agent-shell-queue-compose--quit-or-kill)))
+    (should (equal quit-args '(t)))
+    (should (null killed))))
+
+(ert-deftest agent-shell-queue-compose--quit-or-kill-kills-buffer-when-not-displayed ()
+  "When the compose buffer isn't displayed, fall back to `kill-buffer'."
+  (let (quit-called killed-buffer)
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) nil))
+                ((symbol-function 'quit-window)
+                 (lambda (&rest _) (setq quit-called t)))
+                ((symbol-function 'kill-buffer)
+                 (lambda (b) (setq killed-buffer b))))
+        (agent-shell-queue-compose--quit-or-kill)
+        (should (eq killed-buffer (current-buffer)))))
+    (should (null quit-called))))
 
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here
