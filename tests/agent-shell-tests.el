@@ -531,7 +531,7 @@
                                   (cons :event-subscriptions nil)
                                   (cons :client 'test-client)
                                   (cons :session (list (cons :id "test-session")
-                                                  (cons :title nil)))
+                                                       (cons :title nil)))
                                   (cons :last-entry-type nil)
                                   (cons :last-activity-time nil)
                                   (cons :tool-calls nil)
