@@ -1180,19 +1180,20 @@ Works from both shell and viewport buffers."
         (agent-shell--display-buffer new-shell-buffer)))))
 
 ;;;###autoload
-(defun agent-shell-resume-session (session-id)
-  "Resume an existing agent session by SESSION-ID.
+(defun agent-shell-resume-session ()
+  "Resume an existing agent session via the session picker.
 
-Prompts for agent selection and starts a new shell that resumes
-the session identified by SESSION-ID."
-  (interactive "sSession ID: ")
-  (when (string-empty-p (string-trim session-id))
-    (user-error "Session ID cannot be empty"))
+Prompts for agent selection, then starts a new shell that lists known
+sessions and lets the user pick one to resume.  Session IDs are shown
+in the picker (overriding `agent-shell-show-session-id' for this shell)
+so users who know an ID can find it via their completion framework."
+  (interactive)
   (agent-shell--start :config (or (agent-shell--resolve-preferred-config)
                                   (agent-shell-select-config
                                    :prompt "Resume with agent: ")
                                   (error "No agent config found"))
-                      :session-id session-id
+                      :session-strategy 'prompt
+                      :show-session-id t
                       :new-session t))
 
 ;;;###autoload
@@ -2815,7 +2816,7 @@ FUNCTION should be a function accepting keyword arguments (&key ...)."
                    (list (car pair) (cdr pair)))
                  alist)))
 
-(cl-defun agent-shell--start (&key config no-focus new-session session-strategy session-id fork-session-id outgoing-request-decorator)
+(cl-defun agent-shell--start (&key config no-focus new-session session-strategy show-session-id session-id fork-session-id outgoing-request-decorator)
   "Programmatically start shell with CONFIG.
 
 See `agent-shell-make-agent-config' for config format.
@@ -2823,6 +2824,7 @@ See `agent-shell-make-agent-config' for config format.
 Set NO-FOCUS to start in background.
 Set NEW-SESSION to start a separate new session.
 SESSION-STRATEGY overrides `agent-shell-session-strategy' buffer-locally.
+SHOW-SESSION-ID overrides `agent-shell-show-session-id' buffer-locally.
 SESSION-ID resumes an existing session by its id string.
 FORK-SESSION-ID forks an existing session by its id string.
 OUTGOING-REQUEST-DECORATOR is passed through to `acp-make-client'."
@@ -2922,6 +2924,8 @@ variable (see makunbound)"))
         (map-put! agent-shell--state :fork-session-id fork-session-id))
       (when session-strategy
         (setq-local agent-shell-session-strategy session-strategy))
+      (when show-session-id
+        (setq-local agent-shell-show-session-id show-session-id))
       ;; Show deferred welcome text,
       ;; but first wipe buffer content.
       (let ((inhibit-read-only t))
