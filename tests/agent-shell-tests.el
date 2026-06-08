@@ -4724,6 +4724,90 @@ down."
           (should (equal (point) (point-min))))
       (kill-buffer shell-buf))))
 
+(ert-deftest agent-shell--update-fragment-keeps-point-at-end-test ()
+  "A streamed fragment must not strand point above what it just inserted.
+
+Point sitting at end-of-buffer is point sitting at the prompt, and it
+belongs there once the fragment lands.  `shell-maker-with-auto-scroll-edit'
+cannot be relied on for that: it skips the scroll while `window-end'
+trails `point-max', and its `save-excursion' then restores point from an
+insertion-type nil marker that stays before text inserted at point.  The
+buffer is displayed and taller than the window so that suppressed
+auto-scroll is what the test actually exercises."
+  (let ((shell-buf (generate-new-buffer " *test-shell*")))
+    (unwind-protect
+        (with-current-buffer shell-buf
+          (comint-mode)
+          (setq major-mode 'agent-shell-mode)
+          (setq-local agent-shell--state
+                      (agent-shell--make-state :buffer shell-buf))
+          (set-window-buffer (selected-window) shell-buf)
+          (insert (make-string 200 ?\n))
+          (goto-char (point-max))
+          (agent-shell--update-fragment :state agent-shell--state
+                                        :block-id "streamed"
+                                        :body "streamed body")
+          (should (eobp))
+          (goto-char (point-min))
+          (agent-shell--update-fragment :state agent-shell--state
+                                        :block-id "streamed"
+                                        :body "more body")
+          (should (equal (point) (point-min))))
+      (kill-buffer shell-buf))))
+
+(ert-deftest agent-shell--update-fragment-keeps-point-at-prompt-start-test ()
+  "Point at the prompt start rides down with the prompt, not up with output.
+
+A fragment arriving out of turn lands above the live prompt, inserting
+at exactly the position point occupies.  Restoring point from an
+insertion-type nil marker leaves it above the new text, dropping the
+user off their prompt and onto agent output."
+  (let ((shell-buf (generate-new-buffer " *test-shell*")))
+    (unwind-protect
+        (with-current-buffer shell-buf
+          (comint-mode)
+          (setq major-mode 'agent-shell-mode)
+          (setq-local agent-shell--state
+                      (agent-shell--make-state :buffer shell-buf))
+          (set-window-buffer (selected-window) shell-buf)
+          (insert (make-string 200 ?\n))
+          (let ((prompt-start (copy-marker (point) nil)))
+            (insert "> ")
+            (setq-local comint-last-prompt
+                        (cons prompt-start (copy-marker (point) nil)))
+            (insert "typed")
+            (goto-char prompt-start)
+            (agent-shell--update-fragment :state agent-shell--state
+                                          :block-id "late"
+                                          :body "late arrival"
+                                          :above-last-prompt t)
+            (should (equal (point) (marker-position prompt-start)))
+            (should (looking-at-p "> typed"))))
+      (kill-buffer shell-buf))))
+
+(ert-deftest agent-shell--update-text-keeps-point-at-end-test ()
+  "Plain text entries keep point at the end the same way fragments do."
+  (let ((shell-buf (generate-new-buffer " *test-shell*")))
+    (unwind-protect
+        (with-current-buffer shell-buf
+          (comint-mode)
+          (setq major-mode 'agent-shell-mode)
+          (setq-local agent-shell--state
+                      (agent-shell--make-state :buffer shell-buf))
+          (set-window-buffer (selected-window) shell-buf)
+          (insert (make-string 200 ?\n))
+          (goto-char (point-max))
+          (agent-shell--update-text :state agent-shell--state
+                                    :block-id "plain"
+                                    :text "plain text")
+          (should (eobp))
+          (goto-char (point-min))
+          (agent-shell--update-text :state agent-shell--state
+                                    :block-id "plain"
+                                    :text "more plain text")
+          (should (equal (point) (point-min))))
+      (kill-buffer shell-buf))))
+
 (ert-deftest agent-shell--clean-up-tolerates-mode-change-test ()
   "Test `kill-buffer' succeeds after the major mode is manually changed.
 

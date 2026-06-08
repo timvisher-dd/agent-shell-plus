@@ -5214,9 +5214,9 @@ with GROUP-EXPANDED as the group's initial fold state."
     (let* ((buffer-undo-list t)
            (window (get-buffer-window (current-buffer)))
            (auto-scroll (eobp))
-           ;; Use a marker to ensure point restoration
-           ;; lands point after the inserted text.
-           (saved-point (copy-marker (point)))
+           ;; Insertion-type t so point restoration lands point after
+           ;; text inserted at point, not stranded above it.
+           (saved-point (copy-marker (point) t))
            (saved-mark (mark t))
            (saved-mark-active mark-active)
            (saved-window-start (and window (window-start window)))
@@ -5306,14 +5306,16 @@ with GROUP-EXPANDED as the group's initial fold state."
          (run-hook-with-args 'agent-shell-section-functions range))))
        (when late-prompt-start
          (set-marker-insertion-type late-prompt-start orig-insertion-type)))
-      ;; Late-arrival inserts run under a narrow that ends at
-      ;; `comint-last-prompt'.  The auto-scroll branch of
-      ;; `shell-maker-with-auto-scroll-edit' goes to the narrowed
-      ;; `point-max' (= prompt-start position), leaving point stranded
-      ;; on the prompt's first char after the narrowing is dropped.
-      ;; When the user was at absolute eob (i.e. in the input area),
-      ;; restore them there instead.
-      (when (and late-prompt-start auto-scroll)
+      ;; Point was at absolute eob (i.e. in the input area), so it
+      ;; belongs there afterwards.  `shell-maker-with-auto-scroll-edit'
+      ;; cannot be relied on for that: it skips the scroll when
+      ;; `window-end' trails `point-max' while output streams, and its
+      ;; `save-excursion' then restores point from an insertion-type nil
+      ;; marker that stays before text inserted at point.  Late-arrival
+      ;; inserts additionally run under a narrow ending at
+      ;; `comint-last-prompt', whose `point-max' is the prompt's first
+      ;; char rather than the buffer's.
+      (when auto-scroll
         (goto-char (point-max)))
       (unless auto-scroll
         (goto-char saved-point)
@@ -5360,14 +5362,21 @@ APPEND and CREATE-NEW control update behavior."
            :create-new create-new
            :no-undo t))))
     (with-current-buffer (map-elt state :buffer)
-      (shell-maker-with-auto-scroll-edit
-       (agent-shell-ui-update-text
-        :namespace-id ns
-        :block-id block-id
-        :text text
-        :append append
-        :create-new create-new
-        :no-undo t)))))
+      ;; Same point handling as `agent-shell--update-fragment': an
+      ;; insertion-type t marker so point rides text inserted at it, and
+      ;; a snap to `point-max' when point was in the input area.
+      (let ((auto-scroll (eobp))
+            (saved-point (copy-marker (point) t)))
+        (shell-maker-with-auto-scroll-edit
+         (agent-shell-ui-update-text
+          :namespace-id ns
+          :block-id block-id
+          :text text
+          :append append
+          :create-new create-new
+          :no-undo t))
+        (goto-char (if auto-scroll (point-max) saved-point))
+        (set-marker saved-point nil)))))
 
 (defun agent-shell-toggle-logging ()
   "Toggle logging."
