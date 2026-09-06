@@ -5,28 +5,51 @@ A soft fork of [[https://github.com/xenodium/agent-shell][agent-shell]] with ext
 
 * Features on top of agent-shell
 
+Struck-through entries were removed when merging upstream 0.75.2.  The
+breadcrumb at the end of each says where the behaviour lives now.
+
 - CI workflow and local test runner ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/6][#6]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]])
   - Byte-compilation of all =.el= files ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]])
   - ERT test suite ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]])
   - README update check when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])
   - Dependency DAG check (=require= graph must be acyclic) ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
+  - Agent config symlink check (=.agents= entrypoints resolve)
 - Per-shell debug logging infrastructure ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]])
 - Regression tests for shell buffer selection ordering ([[https://github.com/timvisher-dd/agent-shell-plus/pull/3][#3]])
 - CI check that README.org is updated when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])
 - Usage tests and defense against ACP =used > size= bug ([[https://github.com/timvisher-dd/agent-shell-plus/pull/5][#5]])
 - Defensive guards in idle-timer functions so they no-op when shell state is missing instead of erroring ([[https://github.com/timvisher-dd/agent-shell-plus/pull/10][#10]])
+- +Streaming tool output with dedup: incremental chunks from codex-acp, batch
+  results from claude-agent-acp, =<persisted-output>= stripping and an O(n²)
+  rendering fix+ ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]] → [[https://github.com/xenodium/agent-shell/issues/763][xenodium#763]], [[https://github.com/xenodium/agent-shell/issues/757][xenodium#757]])
+- +Append-in-place rendering for streamed fragments, with boundary-newline
+  normalization+ ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]] → [[https://github.com/xenodium/agent-shell/issues/757][xenodium#757]])
+- +DWIM context insertion: inserted context lands at the prompt and fragment
+  updates no longer drag process-mark past it+ ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]] → [[https://github.com/xenodium/agent-shell/issues/678][xenodium#678]])
 - Runtime buffer invariant checking with event tracing and violation debug bundles, including head + tail snapshots for long buffers ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
+- +Render =session/update= chunks streamed after =session/prompt= resolves, so a
+  Claude Code Stop-hook bounce-and-regen turn no longer freezes the buffer+
+  ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]] → [[https://github.com/xenodium/agent-shell/issues/678][xenodium#678]])
 - Surface raw claude-agent-acp SDK messages (including hook lifecycle events) in the debug log when =agent-shell-logging-enabled= is set, so Stop-hook =decision:block= cycles and other hook-driven turn behavior are visible ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
+- +Tunable markdown-overlay debounce via =agent-shell-markdown-overlay-debounce-delay=+
+  ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]] → [[https://github.com/xenodium/agent-shell/commit/5a455a4][in-place renderer]])
 - Bug fix for upstream =shell-maker-define-major-mode= mode-map quoting — without it, every =agent-shell-mode= invocation emits =void-function keymap= because the bare keymap value gets spliced into a backquote that re-evaluates =(keymap ...)= as a function call (worth upstreaming separately) ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
-- Upstream merge (agent-shell 0.75.2): dropped the fork's streaming tool-output
-  dedup, append-in-place fragment rendering, post-=end_turn= chunk rendering,
-  markdown-overlay debounce, process-mark preservation and =gfm-mode= queue
-  compose buffer — upstream now implements all of them.  Desktop idle
-  notifications also left the fork: upstream emits an =idle= event and expects
-  delivery to live in user config, so the terminal detection, OSC sequences and
-  osascript fallback moved to =timvisher-agent-shell-alert.el= in the IDE repo
 - Live-validate workflow doc (=.agents/commands/live-validate.md=) describing the batch-mode rendering verification used for rendering-pipeline changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
+- +=gfm-mode= compose buffer for the interactive =agent-shell-queue-request=+
+  ([[https://github.com/timvisher-dd/agent-shell-plus/pull/9][#9]] → [[https://github.com/xenodium/agent-shell/commit/6ae3fdb][agent-shell-prompt-queue.el]])
+- +Desktop notifications when the prompt is idle and waiting for input+
+  ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]] → moved to =timvisher-agent-shell-alert.el= in the IDE repo;
+  upstream emits the =idle= event but leaves delivery to the consumer)
 - =agent-shell-resume-session= repurposed from an ID-prompt command into a session-picker entry point: opens the same fuzzy-completion picker that =agent-shell-session-strategy= ='prompt= uses, and force-shows session IDs in the picker (via a new =:show-session-id= keyword on =agent-shell--start=) so users with an ID in hand can find it via their completion framework ([[https://github.com/timvisher-dd/agent-shell-plus/pull/11][#11]])
+
+Two pieces of [[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]] were dropped outright rather than replaced — upstream has no
+equivalent, so these are regressions rather than migrations:
+
+- Partial-overlap thought dedup (=agent-shell--thought-chunk-delta=).  Agents
+  that re-deliver the full accumulated thought text after incremental tokens,
+  such as codex-acp, can render duplicated thought text.
+- The =_meta.terminal_output= capability opt-in.  No released acp.el accepts
+  =:meta-capabilities=.
 
 -----
 
