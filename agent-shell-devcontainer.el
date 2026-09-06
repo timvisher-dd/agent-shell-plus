@@ -25,6 +25,9 @@
 
 ;;; Code:
 
+(declare-function json-read-file "json")
+(declare-function map-elt "map")
+
 (declare-function agent-shell-cwd "agent-shell")
 
 (defvar agent-shell-text-file-capabilities)

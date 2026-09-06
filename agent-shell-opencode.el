@@ -80,6 +80,31 @@ when starting a new shell."
   :type '(choice (const nil) string)
   :group 'agent-shell)
 
+(defcustom agent-shell-opencode-default-config-options
+  nil
+  "Default OpenCode config options, applied at session start.
+
+An alist of (OPTION . VALUE).  Both are the ids listed under
+\"Available config options\" when starting a new shell, so whatever
+OpenCode advertises can be set here without further agent-shell
+changes.  OPTION also accepts the ACP category names (\"model\",
+\"mode\", \"thought_level\") for options carrying one.
+
+OpenCode exposes model variants (provider-specific reasoning effort)
+as its \"effort\" option:
+
+  (setq agent-shell-opencode-default-config-options
+        \\='((\"model\" . \"anthropic/claude-opus-4-5\")
+          (\"effort\" . \"high\")
+          (\"mode\" . \"plan\")))
+
+Options are applied in the order listed.  Order matters: OpenCode
+scopes the available efforts to the active model, so \"effort\" belongs
+after \"model\".  An option or value OpenCode does not offer is
+reported and skipped."
+  :type '(alist :key-type string :value-type string)
+  :group 'agent-shell)
+
 (defcustom agent-shell-opencode-default-session-mode-id
   nil
   "Default OpenCode session mode ID.
@@ -124,12 +149,15 @@ Returns an agent configuration alist using `agent-shell-make-agent-config'."
    :shell-prompt "OpenCode> "
    :shell-prompt-regexp "OpenCode> "
    :welcome-function #'agent-shell-opencode--welcome-message
+   :icon-name "opencode.png"
    :client-maker (lambda (buffer)
                    (agent-shell-opencode-make-client :buffer buffer))
    :default-model-id (lambda () agent-shell-opencode-default-model-id)
    :default-session-mode-id (lambda () agent-shell-opencode-default-session-mode-id)
+   :default-config-options (lambda () agent-shell-opencode-default-config-options)
    :install-instructions "See https://opencode.ai/docs for installation."))
 
+;;;###autoload
 (defun agent-shell-opencode-start-agent ()
   "Start an interactive OpenCode agent shell."
   (interactive)

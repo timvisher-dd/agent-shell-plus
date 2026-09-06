@@ -33,6 +33,7 @@
 (eval-when-compile
   (require 'cl-lib))
 (require 'map)
+(require 'agent-shell-faces)
 
 (defvar agent-shell--state)
 (defvar agent-shell-mode)
@@ -64,17 +65,17 @@ Only appears when the ACP server provides usage information."
   "Update usage STATE from PromptResponse ACP-USAGE field.
 Extracts cumulative token counts from the response."
   (let ((usage-state (map-elt state :usage)))
-    (when-let ((total (map-elt acp-usage 'totalTokens)))
+    (when-let* ((total (map-elt acp-usage 'totalTokens)))
       (map-put! usage-state :total-tokens total))
-    (when-let ((input (map-elt acp-usage 'inputTokens)))
+    (when-let* ((input (map-elt acp-usage 'inputTokens)))
       (map-put! usage-state :input-tokens input))
-    (when-let ((output (map-elt acp-usage 'outputTokens)))
+    (when-let* ((output (map-elt acp-usage 'outputTokens)))
       (map-put! usage-state :output-tokens output))
-    (when-let ((thought (map-elt acp-usage 'thoughtTokens)))
+    (when-let* ((thought (map-elt acp-usage 'thoughtTokens)))
       (map-put! usage-state :thought-tokens thought))
-    (when-let ((cached-read (map-elt acp-usage 'cachedReadTokens)))
+    (when-let* ((cached-read (map-elt acp-usage 'cachedReadTokens)))
       (map-put! usage-state :cached-read-tokens cached-read))
-    (when-let ((cached-write (map-elt acp-usage 'cachedWriteTokens)))
+    (when-let* ((cached-write (map-elt acp-usage 'cachedWriteTokens)))
       (map-put! usage-state :cached-write-tokens cached-write))
     (map-put! state :usage usage-state)))
 
@@ -82,14 +83,14 @@ Extracts cumulative token counts from the response."
   "Update usage STATE from session/update ACP-UPDATE.
 Extracts context window and cost information from usage_update notification."
   (let ((usage-state (map-elt state :usage)))
-    (when-let ((used (map-elt acp-update 'used)))
+    (when-let* ((used (map-elt acp-update 'used)))
       (map-put! usage-state :context-used used))
-    (when-let ((size (map-elt acp-update 'size)))
+    (when-let* ((size (map-elt acp-update 'size)))
       (map-put! usage-state :context-size size))
-    (when-let ((cost (map-elt acp-update 'cost)))
-      (when-let ((amount (map-elt cost 'amount)))
+    (when-let* ((cost (map-elt acp-update 'cost)))
+      (when-let* ((amount (map-elt cost 'amount)))
         (map-put! usage-state :cost-amount amount))
-      (when-let ((currency (map-elt cost 'currency)))
+      (when-let* ((currency (map-elt cost 'currency)))
         (map-put! usage-state :cost-currency currency)))
     (map-put! state :usage usage-state)))
 
@@ -172,38 +173,38 @@ When MULTILINE is non-nil, format as right-aligned labeled rows."
     (if multiline
         (concat
          (propertize " Context: "
-                     'face 'font-lock-comment-face
-                     'font-lock-face 'font-lock-comment-face)
+                     'face 'agent-shell-secondary
+                     'font-lock-face 'agent-shell-secondary)
          context "\n"
          (propertize "  Tokens: "
-                     'face 'font-lock-comment-face
-                     'font-lock-face 'font-lock-comment-face)
+                     'face 'agent-shell-secondary
+                     'font-lock-face 'agent-shell-secondary)
          tokens total "\n"
          (propertize "    Cost: "
-                     'face 'font-lock-comment-face
-                     'font-lock-face 'font-lock-comment-face)
+                     'face 'agent-shell-secondary
+                     'font-lock-face 'agent-shell-secondary)
          cost)
       (concat
        (propertize "Context: "
-                   'face 'font-lock-comment-face
-                   'font-lock-face 'font-lock-comment-face)
+                   'face 'agent-shell-secondary
+                   'font-lock-face 'agent-shell-secondary)
        context " "
        (propertize "Tokens: "
-                   'face 'font-lock-comment-face
-                   'font-lock-face 'font-lock-comment-face)
+                   'face 'agent-shell-secondary
+                   'font-lock-face 'agent-shell-secondary)
        tokens total " "
        (propertize "Cost: "
-                   'face 'font-lock-comment-face
-                   'font-lock-face 'font-lock-comment-face)
+                   'face 'agent-shell-secondary
+                   'font-lock-face 'agent-shell-secondary)
        cost))))
 
 (defun agent-shell--context-usage-face (percentage)
   "Return the face for context usage at PERCENTAGE.
 Green for normal, yellow for warning, red for critical."
   (cond
-   ((>= percentage 85) 'error)
-   ((>= percentage 60) 'warning)
-   (t 'success)))
+   ((>= percentage 85) 'agent-shell-error)
+   ((>= percentage 60) 'agent-shell-warning)
+   (t 'agent-shell-success)))
 
 (defun agent-shell--context-usage-indicator-bar (usage context-used context-size)
   "Return a bar indicator for context USAGE.

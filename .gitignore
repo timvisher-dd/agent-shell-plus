@@ -1,5 +1,6 @@
 /.agent-shell/
 /.agents/*.lock
 /deps/
+agent-shell-autoloads.el
 
 *.elc

@@ -94,7 +94,7 @@
     (agent-shell-usage-tests--with-stub
       (let ((indicator (agent-shell--context-usage-indicator)))
         (should indicator)
-        (should (equal 'success (get-text-property 0 'face indicator)))))))
+        (should (equal 'agent-shell-success (get-text-property 0 'face indicator)))))))
 
 (ert-deftest agent-shell-usage--indicator-medium-usage-warning ()
   "Medium usage (60-84%) shows warning."
@@ -103,7 +103,7 @@
     (agent-shell-usage-tests--with-stub
       (let ((indicator (agent-shell--context-usage-indicator)))
         (should indicator)
-        (should (equal 'warning (get-text-property 0 'face indicator)))))))
+        (should (equal 'agent-shell-warning (get-text-property 0 'face indicator)))))))
 
 (ert-deftest agent-shell-usage--indicator-high-usage-error ()
   "High usage (>= 85%) shows error/red."
@@ -112,7 +112,7 @@
     (agent-shell-usage-tests--with-stub
       (let ((indicator (agent-shell--context-usage-indicator)))
         (should indicator)
-        (should (equal 'error (get-text-property 0 'face indicator)))))))
+        (should (equal 'agent-shell-error (get-text-property 0 'face indicator)))))))
 
 (ert-deftest agent-shell-usage--indicator-full-usage ()
   "used == size shows full block with error face."
@@ -121,7 +121,7 @@
     (agent-shell-usage-tests--with-stub
       (let ((indicator (agent-shell--context-usage-indicator)))
         (should (equal "█" (substring-no-properties indicator)))
-        (should (equal 'error (get-text-property 0 'face indicator)))))))
+        (should (equal 'agent-shell-error (get-text-property 0 'face indicator)))))))
 
 (ert-deftest agent-shell-usage--indicator-overflow-shows-question-mark ()
   "used > size shows ? with warning face, not a block character."
@@ -138,7 +138,7 @@
         (agent-shell--state (agent-shell-usage-tests--make-state 965200 1000000)))
     (agent-shell-usage-tests--with-stub
       ;; Pre-compaction: red
-      (should (equal 'error
+      (should (equal 'agent-shell-error
                      (get-text-property 0 'face (agent-shell--context-usage-indicator))))
       ;; Compaction
       (agent-shell--update-usage-from-notification
@@ -146,7 +146,7 @@
        :acp-update '((used . 24095) (size . 1000000)))
       ;; Post-compaction: green, smallest block
       (let ((indicator (agent-shell--context-usage-indicator)))
-        (should (equal 'success (get-text-property 0 'face indicator)))
+        (should (equal 'agent-shell-success (get-text-property 0 'face indicator)))
         (should (equal "▁" (substring-no-properties indicator)))))))
 
 (ert-deftest agent-shell-usage--indicator-block-characters-scale ()
@@ -247,7 +247,7 @@
                          (cons 'size (cdar traffic))))
       (let ((indicator (agent-shell--context-usage-indicator)))
         (should (equal "▁" (substring-no-properties indicator)))
-        (should (equal 'success (get-text-property 0 'face indicator))))
+        (should (equal 'agent-shell-success (get-text-property 0 'face indicator))))
       ;; Replay remaining updates
       (dolist (pair (cdr traffic))
         (agent-shell--update-usage-from-notification
@@ -290,7 +290,7 @@
     ;; Indicator: green, ▂ for 26.3%
     (agent-shell-usage-tests--with-stub
       (let ((indicator (agent-shell--context-usage-indicator)))
-        (should (equal 'success (get-text-property 0 'face indicator)))
+        (should (equal 'agent-shell-success (get-text-property 0 'face indicator)))
         (should (equal "▂" (substring-no-properties indicator)))))))
 
 ;; ============================================================

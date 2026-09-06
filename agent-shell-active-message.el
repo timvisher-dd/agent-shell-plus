@@ -42,13 +42,15 @@ Returns an active message alist for use with
           (cons :timer timer))))
 
 (cl-defun agent-shell-active-message-hide (&key active-message)
-  "Hide ACTIVE-MESSAGE previously shown with
+  "Hide ACTIVE-MESSAGE.
+
+ACTIVE-MESSAGE is the value previously returned by
 `agent-shell-active-message-show'."
   (when active-message
-    (when-let ((timer (map-elt active-message :timer)))
+    (when-let* ((timer (map-elt active-message :timer)))
       (when (timerp timer)
         (cancel-timer timer)))
-    (when-let ((reporter (map-elt active-message :reporter)))
+    (when-let* ((reporter (map-elt active-message :reporter)))
       (progress-reporter-done reporter)
       (message nil))))
 

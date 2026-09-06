@@ -29,6 +29,8 @@ stubbed out so only shell-mode buffers are considered."
                 (lambda (b)
                   `(with-current-buffer ,(car b)
                      (setq major-mode 'agent-shell-mode)
+                     (setq-local shell-maker--config
+                                 (make-shell-maker-config :name "Test"))
                      (setq default-directory ,(cadr b))))
                 bindings)
              (cl-letf (((symbol-function 'agent-shell-viewport--shell-buffer)
@@ -37,9 +39,10 @@ stubbed out so only shell-mode buffers are considered."
                         (lambda ()
                           (expand-file-name default-directory))))
                ,@body))
-         ,@(mapcar (lambda (sym) `(when (buffer-live-p ,sym)
-                                    (kill-buffer ,sym)))
-                   buffer-syms)))))
+         (let ((shell-maker-prompt-before-killing-buffer nil))
+           ,@(mapcar (lambda (sym) `(when (buffer-live-p ,sym)
+                                      (kill-buffer ,sym)))
+                     buffer-syms))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Tests for (buffer-list) based ordering
