@@ -72,7 +72,6 @@
 (require 'agent-shell-goose)
 (require 'agent-shell-heartbeat)
 (require 'agent-shell-active-message)
-(require 'agent-shell-alert)
 (require 'agent-shell-hermes)
 (require 'agent-shell-kimi)
 (require 'agent-shell-kiro)
@@ -4932,8 +4931,6 @@ variable (see makunbound)"))
       ;; `agent-shell--handle'.  Fire mode hook so initial
       ;; state is available to agent-shell-mode-hook(s).
       (run-hooks 'agent-shell-mode-hook)
-      ;; Subscribe to lifecycle events for idle notification management.
-      (agent-shell--idle-notification-subscribe shell-buffer)
       ;; Refresh the session title from the agent. `init-finished' fires
       ;; once the session is established (covers resumed sessions whose
       ;; title is already known) and `turn-complete' covers ongoing
@@ -6625,28 +6622,7 @@ the original EVENT as :idle-event."
     (when (map-contains-key state :idle-timer)
       (map-put! state :idle-timer nil))))
 
-(defun agent-shell--idle-notification-fire (event)
-  "Notify the user that the shell behind EVENT is waiting for input.
-Does nothing while the shell is busy."
-  (when-let* ((buffer (map-nested-elt event '(:data :buffer)))
-              ((buffer-live-p buffer)))
-    (with-current-buffer buffer
-      (if (shell-maker-busy)
-          (agent-shell--log "IDLE NOTIFICATION" "suppressed (shell busy)")
-        (agent-shell--log "IDLE NOTIFICATION" "fire")
-        (unless (eq buffer (window-buffer (selected-window)))
-          (message "agent-shell: Prompt is waiting for input"))
-        (agent-shell-alert-notify "agent-shell" "Prompt is waiting for input")))))
 
-(defun agent-shell--idle-notification-subscribe (shell-buffer)
-  "Send a desktop notification when SHELL-BUFFER goes idle.
-Rides the `idle' event, armed after `turn-complete' and
-`permission-request' and cancelled by agent activity.  Tune the delay
-via `agent-shell-idle-timeout'."
-  (agent-shell-subscribe-to
-   :shell-buffer shell-buffer
-   :event 'idle
-   :on-event #'agent-shell--idle-notification-fire))
 
 ;;; Initialization
 

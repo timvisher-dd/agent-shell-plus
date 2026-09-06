@@ -10,7 +10,6 @@ A soft fork of [[https://github.com/xenodium/agent-shell][agent-shell]] with ext
   - ERT test suite ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]])
   - README update check when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])
   - Dependency DAG check (=require= graph must be acyclic) ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
-- Desktop notifications when the prompt is idle and waiting for input, riding upstream's =idle= event (so =agent-shell-idle-timeout= tunes the delay, and permission requests notify too) ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]])
 - Per-shell debug logging infrastructure ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]])
 - Regression tests for shell buffer selection ordering ([[https://github.com/timvisher-dd/agent-shell-plus/pull/3][#3]])
 - CI check that README.org is updated when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])
@@ -22,7 +21,10 @@ A soft fork of [[https://github.com/xenodium/agent-shell][agent-shell]] with ext
 - Upstream merge (agent-shell 0.75.2): dropped the fork's streaming tool-output
   dedup, append-in-place fragment rendering, post-=end_turn= chunk rendering,
   markdown-overlay debounce, process-mark preservation and =gfm-mode= queue
-  compose buffer — upstream now implements all of them
+  compose buffer — upstream now implements all of them.  Desktop idle
+  notifications also left the fork: upstream emits an =idle= event and expects
+  delivery to live in user config, so the terminal detection, OSC sequences and
+  osascript fallback moved to =timvisher-agent-shell-alert.el= in the IDE repo
 - Live-validate workflow doc (=.agents/commands/live-validate.md=) describing the batch-mode rendering verification used for rendering-pipeline changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
 - =agent-shell-resume-session= repurposed from an ID-prompt command into a session-picker entry point: opens the same fuzzy-completion picker that =agent-shell-session-strategy= ='prompt= uses, and force-shows session IDs in the picker (via a new =:show-session-id= keyword on =agent-shell--start=) so users with an ID in hand can find it via their completion framework ([[https://github.com/timvisher-dd/agent-shell-plus/pull/11][#11]])
 
