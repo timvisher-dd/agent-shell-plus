@@ -10,7 +10,7 @@ A soft fork of [[https://github.com/xenodium/agent-shell][agent-shell]] with ext
   - ERT test suite ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]])
   - README update check when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])
   - Dependency DAG check (=require= graph must be acyclic) ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
-- Desktop notifications when the prompt is idle and waiting for input ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]])
+- Desktop notifications when the prompt is idle and waiting for input, riding upstream's =idle= event (so =agent-shell-idle-timeout= tunes the delay, and permission requests notify too) ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]])
 - Per-shell debug logging infrastructure ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]])
 - Regression tests for shell buffer selection ordering ([[https://github.com/timvisher-dd/agent-shell-plus/pull/3][#3]])
 - CI check that README.org is updated when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])

@@ -1013,7 +1013,6 @@ The fallback triggers when `agent-shell--build-content-blocks' fails."
                                   (cons :last-entry-type nil)
                                   (cons :last-activity-time nil)
                                   (cons :tool-calls nil)
-                                  (cons :idle-notification-timer nil)
                                   (cons :usage (list (cons :total-tokens 0)))
                                   (cons :idle-timer nil)))
         (agent-shell-show-busy-indicator nil)
@@ -4119,131 +4118,12 @@ other unknown ones."
 
 ;;; Idle notification tests
 
-(ert-deftest agent-shell--idle-notification-start-sets-timer-and-hook-test ()
-  "Test that `agent-shell--idle-notification-start' sets up timer and hook."
-  (with-temp-buffer
-    (let ((agent-shell-idle-notification-delay 30)
-          (agent-shell--state (list (cons :buffer (current-buffer))
-                                    (cons :idle-notification-timer nil))))
-      (cl-letf (((symbol-function 'agent-shell--state)
-                 (lambda () agent-shell--state)))
-        (agent-shell--idle-notification-start)
-        (should (timerp (map-elt agent-shell--state :idle-notification-timer)))
-        (should (memq #'agent-shell--idle-notification-cancel
-                      (buffer-local-value 'post-command-hook (current-buffer))))
-        (agent-shell--idle-notification-cancel)))))
 
-(ert-deftest agent-shell--idle-notification-cancel-cleans-up-test ()
-  "Test that user input cancels the idle notification timer and hook."
-  (with-temp-buffer
-    (let ((agent-shell-idle-notification-delay 30)
-          (agent-shell--state (list (cons :buffer (current-buffer))
-                                    (cons :idle-notification-timer nil))))
-      (cl-letf (((symbol-function 'agent-shell--state)
-                 (lambda () agent-shell--state)))
-        (agent-shell--idle-notification-start)
-        (let ((timer (map-elt agent-shell--state :idle-notification-timer)))
-          (should (timerp timer))
-          (agent-shell--idle-notification-cancel)
-          (should-not (map-elt agent-shell--state :idle-notification-timer))
-          (should-not (memq #'agent-shell--idle-notification-cancel
-                            (buffer-local-value 'post-command-hook (current-buffer)))))))))
 
-(ert-deftest agent-shell--idle-notification-fire-sends-and-cleans-up-test ()
-  "Test that timer firing sends notification and removes hook."
-  (with-temp-buffer
-    (let ((agent-shell-idle-notification-delay 30)
-          (agent-shell--state (list (cons :buffer (current-buffer))
-                                    (cons :idle-notification-timer nil)))
-          (notified nil)
-          (other-buf (generate-new-buffer " *other*")))
-      (cl-letf (((symbol-function 'agent-shell--state)
-                 (lambda () agent-shell--state))
-                ((symbol-function 'agent-shell-alert-notify)
-                 (lambda (title body)
-                   (setq notified (list title body))))
-                ((symbol-function 'shell-maker-busy)
-                 (lambda () nil))
-                ((symbol-function 'window-buffer)
-                 (lambda (&optional _window) other-buf)))
-        (agent-shell--idle-notification-start)
-        (should (timerp (map-elt agent-shell--state :idle-notification-timer)))
-        (agent-shell--idle-notification-fire)
-        (should (equal notified '("agent-shell" "Prompt is waiting for input")))
-        (should-not (map-elt agent-shell--state :idle-notification-timer))
-        (should-not (memq #'agent-shell--idle-notification-cancel
-                          (buffer-local-value 'post-command-hook (current-buffer)))))
-      (kill-buffer other-buf))))
 
-(ert-deftest agent-shell--idle-notification-fire-skips-message-when-buffer-visible-test ()
-  "Test that message is skipped but OS notification still fires when active."
-  (with-temp-buffer
-    (let ((agent-shell-idle-notification-delay 30)
-          (shell-buf (current-buffer))
-          (agent-shell--state (list (cons :buffer (current-buffer))
-                                    (cons :idle-notification-timer nil)))
-          (notified nil)
-          (messages nil))
-      (cl-letf (((symbol-function 'agent-shell--state)
-                 (lambda () agent-shell--state))
-                ((symbol-function 'agent-shell-alert-notify)
-                 (lambda (title body)
-                   (setq notified (list title body))))
-                ((symbol-function 'shell-maker-busy)
-                 (lambda () nil))
-                ((symbol-function 'window-buffer)
-                 (lambda (&optional _window) shell-buf))
-                ((symbol-function 'message)
-                 (lambda (fmt &rest args)
-                   (push (apply #'format fmt args) messages))))
-        (agent-shell--idle-notification-start)
-        (agent-shell--idle-notification-fire)
-        (should (equal notified '("agent-shell" "Prompt is waiting for input")))
-        (should-not messages)
-        (should-not (map-elt agent-shell--state :idle-notification-timer))))))
 
-(ert-deftest agent-shell--idle-notification-nil-delay-does-nothing-test ()
-  "Test that nil delay means no timer is started."
-  (with-temp-buffer
-    (let ((agent-shell-idle-notification-delay nil)
-          (agent-shell--state (list (cons :buffer (current-buffer))
-                                    (cons :idle-notification-timer nil))))
-      (cl-letf (((symbol-function 'agent-shell--state)
-                 (lambda () agent-shell--state)))
-        (agent-shell--idle-notification-start)
-        (should-not (map-elt agent-shell--state :idle-notification-timer))
-        (should-not (memq #'agent-shell--idle-notification-cancel
-                          (buffer-local-value 'post-command-hook (current-buffer))))))))
 
-(ert-deftest agent-shell--idle-notification-subscribe-turn-complete-starts-test ()
-  "Test that `turn-complete' event starts idle notification via subscription."
-  (with-temp-buffer
-    (let ((agent-shell-idle-notification-delay 30)
-          (agent-shell--state (list (cons :buffer (current-buffer))
-                                    (cons :event-subscriptions nil)
-                                    (cons :idle-notification-timer nil))))
-      (cl-letf (((symbol-function 'agent-shell--state)
-                 (lambda () agent-shell--state)))
-        (agent-shell--idle-notification-subscribe (current-buffer))
-        (should-not (map-elt agent-shell--state :idle-notification-timer))
-        (agent-shell--emit-event :event 'turn-complete)
-        (should (timerp (map-elt agent-shell--state :idle-notification-timer)))
-        (agent-shell--idle-notification-cancel)))))
 
-(ert-deftest agent-shell--idle-notification-subscribe-clean-up-cancels-test ()
-  "Test that `clean-up' event cancels idle notification via subscription."
-  (with-temp-buffer
-    (let ((agent-shell-idle-notification-delay 30)
-          (agent-shell--state (list (cons :buffer (current-buffer))
-                                    (cons :event-subscriptions nil)
-                                    (cons :idle-notification-timer nil))))
-      (cl-letf (((symbol-function 'agent-shell--state)
-                 (lambda () agent-shell--state)))
-        (agent-shell--idle-notification-subscribe (current-buffer))
-        (agent-shell--idle-notification-start)
-        (should (timerp (map-elt agent-shell--state :idle-notification-timer)))
-        (agent-shell--emit-event :event 'clean-up)
-        (should-not (map-elt agent-shell--state :idle-notification-timer))))))
 
 (ert-deftest agent-shell-alert--detect-terminal-term-program-test ()
   "Test terminal detection via TERM_PROGRAM."
@@ -7399,6 +7279,78 @@ Then [after](https://after.com/y)
     (should (eq (char-after) ?B))
     (agent-shell-previous-item)
     (should (eq (char-after) ?A))))
+
+(ert-deftest agent-shell--idle-notification-fire-notifies-test ()
+  "An `idle' event notifies and messages when the shell isn't visible."
+  (with-temp-buffer
+    (let ((shell-buf (current-buffer))
+          (other-buf (generate-new-buffer " *other*"))
+          (notified nil)
+          (messages nil))
+      (unwind-protect
+          (cl-letf (((symbol-function 'agent-shell-alert-notify)
+                     (lambda (title body) (setq notified (list title body))))
+                    ((symbol-function 'shell-maker-busy) (lambda () nil))
+                    ((symbol-function 'agent-shell--log) #'ignore)
+                    ((symbol-function 'window-buffer)
+                     (lambda (&optional _window) other-buf))
+                    ((symbol-function 'message)
+                     (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+            (agent-shell--idle-notification-fire
+             (list (cons :data (list (cons :buffer shell-buf)))))
+            (should (equal notified '("agent-shell" "Prompt is waiting for input")))
+            (should (equal messages '("agent-shell: Prompt is waiting for input"))))
+        (kill-buffer other-buf)))))
+
+(ert-deftest agent-shell--idle-notification-fire-skips-message-when-buffer-visible-test ()
+  "The message is skipped when the shell is the selected window's buffer."
+  (with-temp-buffer
+    (let ((shell-buf (current-buffer))
+          (notified nil)
+          (messages nil))
+      (cl-letf (((symbol-function 'agent-shell-alert-notify)
+                 (lambda (title body) (setq notified (list title body))))
+                ((symbol-function 'shell-maker-busy) (lambda () nil))
+                ((symbol-function 'agent-shell--log) #'ignore)
+                ((symbol-function 'window-buffer)
+                 (lambda (&optional _window) shell-buf))
+                ((symbol-function 'message)
+                 (lambda (fmt &rest args) (push (apply #'format fmt args) messages))))
+        (agent-shell--idle-notification-fire
+         (list (cons :data (list (cons :buffer shell-buf)))))
+        (should (equal notified '("agent-shell" "Prompt is waiting for input")))
+        (should-not messages)))))
+
+(ert-deftest agent-shell--idle-notification-fire-suppressed-when-busy-test ()
+  "No notification fires while the shell is still busy."
+  (with-temp-buffer
+    (let ((shell-buf (current-buffer))
+          (notified nil))
+      (cl-letf (((symbol-function 'agent-shell-alert-notify)
+                 (lambda (&rest _) (setq notified t)))
+                ((symbol-function 'shell-maker-busy) (lambda () t))
+                ((symbol-function 'agent-shell--log) #'ignore))
+        (agent-shell--idle-notification-fire
+         (list (cons :data (list (cons :buffer shell-buf)))))
+        (should-not notified)))))
+
+(ert-deftest agent-shell--idle-notification-subscribe-fires-on-idle-event-test ()
+  "Subscribing routes the `idle' event to the notification handler."
+  (with-temp-buffer
+    (let ((agent-shell--state (list (cons :buffer (current-buffer))
+                                    (cons :event-subscriptions nil)))
+          (fired nil))
+      (cl-letf (((symbol-function 'agent-shell--state)
+                 (lambda () agent-shell--state))
+                ((symbol-function 'agent-shell--idle-notification-fire)
+                 (lambda (_event) (setq fired t))))
+        (agent-shell--idle-notification-subscribe (current-buffer))
+        (should-not fired)
+        (agent-shell--emit-event :event 'turn-complete)
+        (should-not fired)
+        (agent-shell--emit-event :event 'idle
+                                 :data (list (cons :buffer (current-buffer))))
+        (should fired)))))
 
 (provide 'agent-shell-tests)
 ;;; agent-shell-tests.el ends here

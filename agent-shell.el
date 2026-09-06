@@ -1327,19 +1327,11 @@ OUTGOING-REQUEST-DECORATOR (passed through to `acp-make-client')."
                            (cons :context-size 0)
                            (cons :cost-amount 0.0)
                            (cons :cost-currency nil)))
-        (cons :idle-notification-timer nil)
         (cons :insert-cursor nil)))
 
 (defvar-local agent-shell--state
     (agent-shell--make-state))
 
-(defvar agent-shell-idle-notification-delay 30
-  "Seconds of idle time before sending a terminal notification.
-Defaults to 30.  When non-nil, a timer starts each time an agent
-turn completes.  If the user does not interact with the buffer
-within this many seconds, a desktop notification is sent via OSC
-escape sequences.  Any user input in the buffer cancels the
-pending notification.  Set to nil to disable idle notifications.")
 
 (defvar-local agent-shell--transcript-file nil
   "Path to the shell's transcript file.")
@@ -6599,56 +6591,9 @@ DATA is an optional alist of event-specific data."
 
 ;;; Idle notification
 
-(defun agent-shell--idle-notification-cancel ()
-  "Cancel pending idle notification timer and remove the hook."
-  (when-let ((timer (map-elt (agent-shell--state) :idle-notification-timer)))
-    (when (timerp timer)
-      (cancel-timer timer))
-    (map-put! (agent-shell--state) :idle-notification-timer nil))
-  (remove-hook 'post-command-hook #'agent-shell--idle-notification-cancel t))
 
-(defun agent-shell--idle-notification-fire ()
-  "Send idle notification and clean up the hook.
-Does nothing if the shell is busy — notifications should only fire
-when the prompt is idle and waiting for input."
-  (remove-hook 'post-command-hook #'agent-shell--idle-notification-cancel t)
-  (map-put! (agent-shell--state) :idle-notification-timer nil)
-  (if (shell-maker-busy)
-      (agent-shell--log "IDLE NOTIFICATION" "suppressed (shell busy)")
-    (agent-shell--log "IDLE NOTIFICATION" "fire")
-    (unless (eq (map-elt (agent-shell--state) :buffer)
-                (window-buffer (selected-window)))
-      (message "agent-shell: Prompt is waiting for input"))
-    (agent-shell-alert-notify "agent-shell" "Prompt is waiting for input")))
 
-(defun agent-shell--idle-notification-start ()
-  "Start idle notification timer if `agent-shell-idle-notification-delay' is set."
-  (when agent-shell-idle-notification-delay
-    (agent-shell--idle-notification-cancel)
-    (let ((shell-buffer (map-elt (agent-shell--state) :buffer)))
-      (map-put! (agent-shell--state)
-                :idle-notification-timer
-                (run-at-time agent-shell-idle-notification-delay nil
-                             (lambda ()
-                               (when (buffer-live-p shell-buffer)
-                                 (with-current-buffer shell-buffer
-                                   (agent-shell--idle-notification-fire))))))
-      (add-hook 'post-command-hook #'agent-shell--idle-notification-cancel nil t))))
 
-(defun agent-shell--idle-notification-subscribe (shell-buffer)
-  "Subscribe to events in SHELL-BUFFER to manage idle notifications.
-Starts the idle notification timer on `turn-complete' and cancels
-it on `clean-up'."
-  (agent-shell-subscribe-to
-   :shell-buffer shell-buffer
-   :event 'turn-complete
-   :on-event (lambda (_event)
-               (agent-shell--idle-notification-start)))
-  (agent-shell-subscribe-to
-   :shell-buffer shell-buffer
-   :event 'clean-up
-   :on-event (lambda (_event)
-               (agent-shell--idle-notification-cancel))))
 
 (cl-defun agent-shell--start-idle-timer (&key event data)
   "Start the idle timer for EVENT with DATA.
@@ -6679,6 +6624,29 @@ the original EVENT as :idle-event."
       (cancel-timer timer))
     (when (map-contains-key state :idle-timer)
       (map-put! state :idle-timer nil))))
+
+(defun agent-shell--idle-notification-fire (event)
+  "Notify the user that the shell behind EVENT is waiting for input.
+Does nothing while the shell is busy."
+  (when-let* ((buffer (map-nested-elt event '(:data :buffer)))
+              ((buffer-live-p buffer)))
+    (with-current-buffer buffer
+      (if (shell-maker-busy)
+          (agent-shell--log "IDLE NOTIFICATION" "suppressed (shell busy)")
+        (agent-shell--log "IDLE NOTIFICATION" "fire")
+        (unless (eq buffer (window-buffer (selected-window)))
+          (message "agent-shell: Prompt is waiting for input"))
+        (agent-shell-alert-notify "agent-shell" "Prompt is waiting for input")))))
+
+(defun agent-shell--idle-notification-subscribe (shell-buffer)
+  "Send a desktop notification when SHELL-BUFFER goes idle.
+Rides the `idle' event, armed after `turn-complete' and
+`permission-request' and cancelled by agent activity.  Tune the delay
+via `agent-shell-idle-timeout'."
+  (agent-shell-subscribe-to
+   :shell-buffer shell-buffer
+   :event 'idle
+   :on-event #'agent-shell--idle-notification-fire))
 
 ;;; Initialization
 
@@ -9837,9 +9805,6 @@ Returns an alist with insertion details or nil otherwise:
     (user-error "No text provided to insert"))
   (let* ((shell-buffer (or shell-buffer
                            (agent-shell--shell-buffer :no-create t))))
-    (when (buffer-live-p shell-buffer)
-      (with-current-buffer shell-buffer
-        (agent-shell--idle-notification-cancel)))
     (if (with-current-buffer shell-buffer
           (or (map-nested-elt agent-shell--state '(:session :id))
               (eq agent-shell-session-strategy 'new-deferred)
