@@ -41,16 +41,9 @@ breadcrumb at the end of each says where the behaviour lives now.
   ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]] → moved to =timvisher-agent-shell-alert.el= in the IDE repo;
   upstream emits the =idle= event but leaves delivery to the consumer)
 - =agent-shell-resume-session= repurposed from an ID-prompt command into a session-picker entry point: opens the same fuzzy-completion picker that =agent-shell-session-strategy= ='prompt= uses, and force-shows session IDs in the picker (via a new =:show-session-id= keyword on =agent-shell--start=) so users with an ID in hand can find it via their completion framework ([[https://github.com/timvisher-dd/agent-shell-plus/pull/11][#11]])
-- Fix streaming cursor drop: a fragment or text entry rendered while the
-  cursor sits at the prompt no longer strands point above the inserted text
-  - =agent-shell--update-fragment= saves point in an insertion-type t marker
-    (its comment already claimed as much) so point rides text inserted at it,
-    and snaps to =point-max= whenever point was at end-of-buffer rather than
-    only on the late-arrival path.  =shell-maker-with-auto-scroll-edit= can't
-    be relied on here: it skips the scroll while =window-end= trails
-    =point-max=, then restores point from an insertion-type nil marker
-  - =agent-shell--update-text= gets the same treatment; it had no point
-    handling at all
+- Keep point with the prompt across streamed fragment and text inserts, so a
+  fragment rendered while the cursor sits at the prompt no longer strands point
+  above the inserted text ([[https://github.com/timvisher-dd/agent-shell-plus/pull/13][#13]])
 
 Two pieces of [[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]] were dropped outright rather than replaced — upstream has no
 equivalent, so these are regressions rather than migrations:
