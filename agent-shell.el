@@ -7964,9 +7964,54 @@ SESSION-TITLE is an optional display title for the resumed session."
                                         (propertize "Forked session" 'font-lock-face 'agent-shell-section-heading))
                     :expanded t
                     :body (or new-session-id ""))
-                   (agent-shell--finalize-session-init :on-session-init on-session-init)))
+                   (agent-shell--initiate-forked-session-binding
+                    :session-id new-session-id
+                    :shell-buffer shell-buffer
+                    :on-session-init on-session-init)))
    :on-failure (agent-shell--make-error-handler
                 :state (agent-shell--state) :shell-buffer shell-buffer)))
+
+(cl-defun agent-shell--initiate-forked-session-binding (&key session-id shell-buffer on-session-init)
+  "Bind a live agent session to forked SESSION-ID, then finalize init.
+
+`session/fork' can return a session id the agent has not bound a
+live session to, in which case the first `session/prompt' fails with
+\"Session not found\".  Sends `session/resume' when the agent
+supports it, `session/load' when only that is supported, and
+finalizes right away when the agent supports neither.
+
+SHELL-BUFFER and ON-SESSION-INIT are as in
+`agent-shell--initiate-session-fork-by-id'."
+  (let* ((use-resume (map-elt (agent-shell--state) :supports-session-resume))
+         (use-load (and (not use-resume)
+                        (map-elt (agent-shell--state) :supports-session-load))))
+    (if (not (or use-resume use-load))
+        (agent-shell--finalize-session-init :on-session-init on-session-init)
+      (agent-shell--send-request
+       :state (agent-shell--state)
+       :client (map-elt (agent-shell--state) :client)
+       :request (let ((cwd (agent-shell--resolve-path (agent-shell-cwd)))
+                      (mcp-servers (agent-shell--mcp-servers))
+                      (meta (map-nested-elt (agent-shell--state) '(:agent-config :session-meta))))
+                  (if use-resume
+                      (acp-make-session-resume-request
+                       :session-id session-id
+                       :cwd cwd
+                       :mcp-servers mcp-servers
+                       :meta meta)
+                    (acp-make-session-load-request
+                     :session-id session-id
+                     :cwd cwd
+                     :mcp-servers mcp-servers
+                     :meta meta)))
+       :buffer (current-buffer)
+       :on-success (lambda (acp-response)
+                     (agent-shell--set-session-from-response
+                      :acp-response acp-response
+                      :acp-session-id session-id)
+                     (agent-shell--finalize-session-init :on-session-init on-session-init))
+       :on-failure (agent-shell--make-error-handler
+                    :state (agent-shell--state) :shell-buffer shell-buffer)))))
 
 (cl-defun agent-shell--initiate-session-list-and-load (&key shell-buffer on-session-init)
   "Try loading latest existing session with SHELL-BUFFER and ON-SESSION-INIT."
