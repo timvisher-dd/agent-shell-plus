@@ -4994,6 +4994,67 @@ user off their prompt and onto agent output."
           (should (equal (point) (point-min))))
       (kill-buffer shell-buf))))
 
+(defun agent-shell-tests--submit-with-point (at-prompt &rest insert-args)
+  "Submit \"queued prompt\" and return point and the buffer text after.
+
+The shell has some transcript followed by its live prompt.  Point
+starts at the prompt when AT-PROMPT is non-nil, at the start of the
+transcript otherwise.  `agent-shell--insert-to-shell-buffer' is called
+with INSERT-ARGS plus :submit t, and `shell-maker-submit' is stubbed
+to jump to `point-max' the way the real one does.  Returns
+\(POINT . TEXT)."
+  (let ((shell-buf (generate-new-buffer " *test-shell*")))
+    (unwind-protect
+        (with-current-buffer shell-buf
+          (comint-mode)
+          (setq major-mode 'agent-shell-mode)
+          (setq-local agent-shell--state
+                      (agent-shell--make-state :buffer shell-buf))
+          (map-put! (map-elt agent-shell--state :session) :id "session")
+          (let ((process (make-pipe-process :name "test-shell"
+                                            :buffer shell-buf
+                                            :noquery t)))
+            (unwind-protect
+                (progn
+                  (insert "earlier reply\n> ")
+                  (set-marker (process-mark process) (point-max))
+                  (unless at-prompt
+                    (goto-char (point-min)))
+                  (cl-letf (((symbol-function 'shell-maker-busy) #'ignore)
+                            ((symbol-function 'agent-shell--display-buffer) #'ignore)
+                            ((symbol-function 'shell-maker-submit)
+                             (lambda (&rest _)
+                               (goto-char (point-max))
+                               (insert "\n> "))))
+                    (apply #'agent-shell--insert-to-shell-buffer
+                           :shell-buffer shell-buf
+                           :text "queued prompt"
+                           :submit t
+                           insert-args))
+                  (cons (point) (buffer-string)))
+              (delete-process process))))
+      (kill-buffer shell-buf))))
+
+(ert-deftest agent-shell--insert-to-shell-buffer-no-focus-submit-keeps-point-test ()
+  "A no-focus submission leaves a reader's point in the transcript.
+
+Queued prompts are submitted this way when a turn ends, so without it
+`shell-maker-submit' yanks whoever is reading back through the shell
+down to the prompt."
+  (let ((result (agent-shell-tests--submit-with-point nil :no-focus t)))
+    (should (equal (point-min) (car result)))
+    (should (equal "earlier reply\n> queued prompt\n> " (cdr result)))))
+
+(ert-deftest agent-shell--insert-to-shell-buffer-focused-submit-moves-point-test ()
+  "A submission that asks for focus still takes point to the prompt."
+  (let ((result (agent-shell-tests--submit-with-point nil)))
+    (should (equal (1+ (length (cdr result))) (car result)))))
+
+(ert-deftest agent-shell--insert-to-shell-buffer-no-focus-submit-at-prompt-follows-test ()
+  "Point already at the prompt follows a no-focus submission down."
+  (let ((result (agent-shell-tests--submit-with-point t :no-focus t)))
+    (should (equal (1+ (length (cdr result))) (car result)))))
+
 (ert-deftest agent-shell--clean-up-tolerates-mode-change-test ()
   "Test `kill-buffer' succeeds after the major mode is manually changed.
 

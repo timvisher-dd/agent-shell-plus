@@ -9816,6 +9816,12 @@ Returns non-nil if a permission button was found, nil otherwise."
 
 ;;; Region
 
+(defun agent-shell--point-at-prompt-p ()
+  "Return non-nil when point is at the current shell's live prompt."
+  (if-let* ((process (get-buffer-process (current-buffer))))
+      (<= (process-mark process) (point))
+    (eobp)))
+
 (cl-defun agent-shell--insert-to-shell-buffer (&key shell-buffer text submit no-focus)
   "Insert TEXT into the agent shell buffer at `point-max'.
 
@@ -9824,7 +9830,9 @@ Otherwise, uses `agent-shell--shell-buffer' to find one.
 
 SUBMIT, when non-nil, submits the shell buffer after insertion.
 
-NO-FOCUS, when non-nil, avoid focusing shell on insertion.
+NO-FOCUS, when non-nil, avoid focusing shell on insertion.  A
+submission then leaves point where it was, unless point is at the
+prompt, so someone reading back through the shell keeps their place.
 
 Returns an alist with insertion details or nil otherwise:
 
@@ -9865,7 +9873,10 @@ Returns an alist with insertion details or nil otherwise:
                 ;; TODO: Render prompt markdown?
                 ))
             (when submit
-              (shell-maker-submit)))
+              (if (and no-focus (not (agent-shell--point-at-prompt-p)))
+                  (save-excursion
+                    (shell-maker-submit))
+                (shell-maker-submit))))
           `((:buffer . ,shell-buffer)
             (:start . ,insert-start)
             (:end . ,insert-end)))
