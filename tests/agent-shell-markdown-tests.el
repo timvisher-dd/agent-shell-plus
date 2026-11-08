@@ -28,6 +28,87 @@
                  '(("hello " nil)
                    ("world" (agent-shell-markdown-bold))))))
 
+(ert-deftest agent-shell-markdown-convert-bold-adjacent-to-text ()
+  (dolist (case '(("这是**重点**内容"
+                   (("这是" nil) ("重点" (agent-shell-markdown-bold)) ("内容" nil)))
+                  ("（**重点**）"
+                   (("（" nil) ("重点" (agent-shell-markdown-bold)) ("）" nil)))
+                  ("(**bold**)"
+                   (("(" nil) ("bold" (agent-shell-markdown-bold)) (")" nil)))
+                  ("**重点**（说明）"
+                   (("重点" (agent-shell-markdown-bold)) ("（说明）" nil)))
+                  ("word**bold**tail"
+                   (("word" nil) ("bold" (agent-shell-markdown-bold)) ("tail" nil)))
+                  ("（__重点__）"
+                   (("（" nil) ("重点" (agent-shell-markdown-bold)) ("）" nil)))
+                  ("**one**，**two**"
+                   (("one" (agent-shell-markdown-bold)) ("，" nil)
+                    ("two" (agent-shell-markdown-bold))))))
+    (ert-info ((format "Markdown: %S" (car case)))
+      (should (equal (agent-shell-markdown--deconstruct
+                      (agent-shell-markdown-convert (car case)))
+                     (cadr case))))))
+
+(ert-deftest agent-shell-markdown-convert-bold-delimiter-boundaries ()
+  (dolist (source '("word__literal__tail" "** leading**" "**trailing **"
+                    "a**\"quoted\"**b" "**unclosed"))
+    (ert-info ((format "Markdown: %S" source))
+      (should (equal (agent-shell-markdown--deconstruct
+                      (agent-shell-markdown-convert source))
+                     (list (list source nil)))))))
+
+(ert-deftest agent-shell-markdown-bold-adjacent-to-text-across-chunks ()
+  (with-temp-buffer
+    (dolist (chunk '("这是*" "*重" "点*" "*内容（*" "*说明**）\n"))
+      (goto-char (point-max))
+      (insert chunk)
+      (agent-shell-markdown-replace-markup :render-images nil))
+    (should (equal (agent-shell-markdown--deconstruct (buffer-string))
+                   '(("这是" nil) ("重点" (agent-shell-markdown-bold))
+                     ("内容（" nil) ("说明" (agent-shell-markdown-bold))
+                     ("）\n" nil))))
+    (should (equal (agent-shell-markdown-reconstruct (point-min) (point-max))
+                   "这是**重点**内容（**说明**）\n"))))
+
+(ert-deftest agent-shell-markdown-convert-italic-adjacent-to-text ()
+  (dolist (case '(("这是*重点*内容"
+                   (("这是" nil) ("重点" (agent-shell-markdown-italic)) ("内容" nil)))
+                  ("（*重点*）"
+                   (("（" nil) ("重点" (agent-shell-markdown-italic)) ("）" nil)))
+                  ("（_重点_）"
+                   (("（" nil) ("重点" (agent-shell-markdown-italic)) ("）" nil)))
+                  ("word*it*tail"
+                   (("word" nil) ("it" (agent-shell-markdown-italic)) ("tail" nil)))
+                  ("a * b *c*"
+                   (("a * b " nil) ("c" (agent-shell-markdown-italic))))
+                  ("***both***"
+                   (("both" (agent-shell-markdown-italic agent-shell-markdown-bold))))))
+    (ert-info ((format "Markdown: %S" (car case)))
+      (should (equal (agent-shell-markdown--deconstruct
+                      (agent-shell-markdown-convert (car case)))
+                     (cadr case))))))
+
+(ert-deftest agent-shell-markdown-convert-italic-delimiter-boundaries ()
+  (dolist (source '("snake_case_name" "中_it_文" "a * leading*" "*trailing *"
+                    "a*\"quoted\"*b" "*unclosed"))
+    (ert-info ((format "Markdown: %S" source))
+      (should (equal (agent-shell-markdown--deconstruct
+                      (agent-shell-markdown-convert source))
+                     (list (list source nil)))))))
+
+(ert-deftest agent-shell-markdown-italic-adjacent-to-text-across-chunks ()
+  (with-temp-buffer
+    (dolist (chunk '("这是*" "重点" "*内容（" "_说明_" "）\n"))
+      (goto-char (point-max))
+      (insert chunk)
+      (agent-shell-markdown-replace-markup :render-images nil))
+    (should (equal (agent-shell-markdown--deconstruct (buffer-string))
+                   '(("这是" nil) ("重点" (agent-shell-markdown-italic))
+                     ("内容（" nil) ("说明" (agent-shell-markdown-italic))
+                     ("）\n" nil))))
+    (should (equal (agent-shell-markdown-reconstruct (point-min) (point-max))
+                   "这是*重点*内容（_说明_）\n"))))
+
 (ert-deftest agent-shell-markdown-escaped-asterisk-in-bold ()
   ;; Regression: `**let vs let\\***' is bold text ending in an escaped
   ;; literal `*' (CommonMark).  The escape lets the bold span match and
@@ -35,6 +116,28 @@
   (should (equal (agent-shell-markdown--deconstruct
                   (agent-shell-markdown-convert "**let vs let\\***"))
                  '(("let vs let*" (agent-shell-markdown-bold))))))
+
+(ert-deftest agent-shell-markdown-delimiter-in-code-inside-bold ()
+  ;; Regression: the `*' inside `let*' is code, not a closing delimiter,
+  ;; so it must not stop the surrounding bold span from matching.
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "**`let` vs `let*`:** the drain"))
+                 '(("let" (agent-shell-markdown-inline-code agent-shell-markdown-bold))
+                   (" vs " (agent-shell-markdown-bold))
+                   ("let*" (agent-shell-markdown-inline-code agent-shell-markdown-bold))
+                   (":" (agent-shell-markdown-bold))
+                   (" the drain" nil)))))
+
+(ert-deftest agent-shell-markdown-delimiter-in-code-inside-emphasis ()
+  ;; Same as above for italic, underscore bold and strike-through.
+  (should (equal (substring-no-properties
+                  (agent-shell-markdown-convert
+                   "*a `b*` c* __d `e_f` g__ ~~h `i~~j` k~~"))
+                 "a b* c d e_f g h i~~j k"))
+  ;; A delimiter only inside code is still not emphasis on its own.
+  (should (equal (substring-no-properties
+                  (agent-shell-markdown-convert "a `**` b `**` c"))
+                 "a ** b ** c")))
 
 (ert-deftest agent-shell-markdown-escaped-punctuation-not-markup ()
   ;; A backslash-escaped delimiter renders as the bare char with no
@@ -133,6 +236,59 @@
                   (agent-shell-markdown-convert "Echo _hello_world"))
                  '(("Echo _hello_world" nil)))))
 
+(ert-deftest agent-shell-markdown-convert-italic-lone-asterisks ()
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "a * b * c"))
+                 '(("a * b * c" nil)))))
+
+(ert-deftest agent-shell-markdown-convert-italic-asterisk-before-inline-code ()
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert
+                   "Started with * and ended with `*`"))
+                 '(("Started with * and ended with " nil)
+                   ("*" (agent-shell-markdown-inline-code))))))
+
+(ert-deftest agent-shell-markdown-convert-italic-closing-inside-inline-code ()
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "a *b `c*` d"))
+                 '(("a *b " nil)
+                   ("c*" (agent-shell-markdown-inline-code))
+                   (" d" nil)))))
+
+(ert-deftest agent-shell-markdown-convert-bold-wrapping-inline-code ()
+  ;; Emphasis wholly enclosing a code span still renders; only a span
+  ;; reaching into code (see the tests around this one) is rejected.
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "a **`b`:** c"))
+                 '(("a " nil)
+                   ("b" (agent-shell-markdown-inline-code agent-shell-markdown-bold))
+                   (":" (agent-shell-markdown-bold))
+                   (" c" nil)))))
+
+(ert-deftest agent-shell-markdown-convert-italic-wrapping-inline-code ()
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "a *see `b`* c"))
+                 '(("a " nil)
+                   ("see " (agent-shell-markdown-italic))
+                   ("b" (agent-shell-markdown-inline-code agent-shell-markdown-italic))
+                   (" c" nil)))))
+
+(ert-deftest agent-shell-markdown-convert-bold-closing-inside-inline-code ()
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "a **b `c**` d"))
+                 '(("a **b " nil)
+                   ("c**" (agent-shell-markdown-inline-code))
+                   (" d" nil)))))
+
+(ert-deftest agent-shell-markdown-convert-italic-around-inline-code ()
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "a *b* `c` d"))
+                 '(("a " nil)
+                   ("b" (agent-shell-markdown-italic))
+                   (" " nil)
+                   ("c" (agent-shell-markdown-inline-code))
+                   (" d" nil)))))
+
 (ert-deftest agent-shell-markdown-convert-multiple ()
   (should (equal (agent-shell-markdown--deconstruct
                   (agent-shell-markdown-convert "_my_ **text**"))
@@ -148,7 +304,7 @@
 (ert-deftest agent-shell-markdown-convert-bold-wrapping-italic ()
   (should (equal (agent-shell-markdown--deconstruct
                   (agent-shell-markdown-convert "**_my text_**"))
-                 '(("my text" (agent-shell-markdown-italic agent-shell-markdown-bold))))))
+                 '(("my text" (agent-shell-markdown-bold agent-shell-markdown-italic))))))
 
 (ert-deftest agent-shell-markdown-convert-bold-with-inner-italic ()
   (should (equal (agent-shell-markdown--deconstruct
@@ -191,6 +347,36 @@
                    ("code" (agent-shell-markdown-inline-code))
                    (" b" nil)))))
 
+(ert-deftest agent-shell-markdown-convert-inline-code-double-backticks ()
+  ;; Regression: a span opened by `` closes on the next `` only, so
+  ;; single backticks inside are body text, and one padding space is
+  ;; stripped from each side.
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "swallow whole `` `code` `` spans"))
+                 '(("swallow whole " nil)
+                   ("`code`" (agent-shell-markdown-inline-code))
+                   (" spans" nil))))
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "a ``b`c`` d"))
+                 '(("a " nil)
+                   ("b`c" (agent-shell-markdown-inline-code))
+                   (" d" nil))))
+  ;; An all-space body keeps its spaces.
+  (should (equal (agent-shell-markdown--deconstruct
+                  (agent-shell-markdown-convert "a `  ` b"))
+                 '(("a " nil)
+                   ("  " (agent-shell-markdown-inline-code))
+                   (" b" nil))))
+  (should (equal (agent-shell-markdown-tests--roundtrip
+                  "swallow whole `` `code` `` spans\n")
+                 "swallow whole `` `code` `` spans\n")))
+
+(ert-deftest agent-shell-markdown-convert-inline-code-double-backticks-protect-markup ()
+  ;; The body of a `` span is protected from the markup passes too.
+  (should (equal (substring-no-properties
+                  (agent-shell-markdown-convert "a `` `**b**` `` c"))
+                 "a `**b**` c")))
+
 (ert-deftest agent-shell-markdown-convert-strikethrough ()
   (should (equal (agent-shell-markdown--deconstruct
                   (agent-shell-markdown-convert "a ~~b~~ c"))
@@ -201,7 +387,7 @@
 (ert-deftest agent-shell-markdown-convert-strikethrough-wrapping-bold ()
   (should (equal (agent-shell-markdown--deconstruct
                   (agent-shell-markdown-convert "~~**bold-strike**~~"))
-                 '(("bold-strike" (agent-shell-markdown-bold agent-shell-markdown-strikethrough))))))
+                 '(("bold-strike" (agent-shell-markdown-strikethrough agent-shell-markdown-bold))))))
 
 (ert-deftest agent-shell-markdown-convert-header-level-1 ()
   ;; Header rendering requires a trailing newline to complete; an
@@ -290,6 +476,47 @@ streaming **not bold**" nil)))))
                    ("docs" (agent-shell-markdown-link))
                    (" please" nil)))))
 
+(ert-deftest agent-shell-markdown-web-links-have-terminal-url ()
+  (dolist (case '(("[docs](https://example.com/path)" . "https://example.com/path")
+                  ("[docs](http://example.com/path)" . "http://example.com/path")
+                  ("[docs](HTTPS://example.com/path)" . "HTTPS://example.com/path")
+                  ("see https://example.com/path." . "https://example.com/path")
+                  ("www.example.com" . "https://www.example.com")
+                  ("![image](https://example.com/image.png)" . "https://example.com/image.png")))
+    (with-temp-buffer
+      (insert (car case))
+      (agent-shell-markdown-replace-markup :render-images t)
+      (goto-char (point-min))
+      (let ((link (text-property-search-forward 'agent-shell-markdown-url)))
+        (should link)
+        (should (equal (get-text-property (prop-match-beginning link)
+                                          'browse-url-data)
+                       (cdr case)))))))
+
+(ert-deftest agent-shell-markdown-nonweb-links-have-no-terminal-url ()
+  (dolist (url '("mailto:user@example.com" "ftp://example.com/file"
+                 "magnet:?xt=urn:btih:abc" "notes.el:12"
+                 "http://" "www."))
+    (with-temp-buffer
+      (insert (format "[other](%s)" url))
+      (agent-shell-markdown-replace-markup)
+      (should (equal (agent-shell-markdown-link-url-at-point (point-min)) url))
+      (should-not (get-text-property (point-min) 'browse-url-data)))))
+
+(ert-deftest agent-shell-markdown-local-links-have-no-terminal-url ()
+  (let ((file (make-temp-file "agent-shell-local-link")))
+    (unwind-protect
+        (let ((default-directory (file-name-directory file)))
+          (dolist (url (list file (concat "file://" file)
+                             (concat file ":1")
+                             (concat (file-name-nondirectory file) ":1")))
+            (with-temp-buffer
+              (insert (format "[local](%s)" url))
+              (agent-shell-markdown-replace-markup)
+              (should (equal (agent-shell-markdown-link-url-at-point (point-min)) url))
+              (should-not (get-text-property (point-min) 'browse-url-data)))))
+      (delete-file file))))
+
 (ert-deftest agent-shell-markdown-hint-stops-at-end-of-what-it-describes ()
   "A hint answers on its own text and not on the character after it.
 
@@ -298,8 +525,8 @@ streaming **not bold**" nil)))))
 `get-pos-property' reports what text inserted at a position would
 inherit rather than what sits there.  Unless the span is
 rear-nonsticky the hint still answers one position past its end, so a
-link's \"Press RET to open in browser\" shows while point sits on the
-space after the link."
+link's \"Press RET to open: ...\" shows while point sits on the space
+after the link."
   (with-temp-buffer
     (insert "see [wool.com](https://wool.com/x) ok\n\n"
             "| A | L |\n|---|---|\n| x | [j.com](https://j.com/y) |\n\n"
@@ -350,12 +577,16 @@ it is still picked up by the bare-URL linkifier."
     ;; The label is left as prose rather than becoming a link title.
     (should-not (get-text-property 5 'agent-shell-markdown-url rendered))))
 
-(ert-deftest agent-shell-markdown-convert-link-with-bold-inside-untouched ()
-  ;; Bold inside link title is left literal (mirrors markdown-overlays:
-  ;; bold regex requires whitespace/BOL before `**', and `[' isn't either).
+(ert-deftest agent-shell-markdown-convert-link-with-bold-inside ()
   (should (equal (agent-shell-markdown--deconstruct
                   (agent-shell-markdown-convert "[**bold**](url)"))
-                 '(("**bold**" (agent-shell-markdown-link))))))
+                 '(("bold" (agent-shell-markdown-link agent-shell-markdown-bold)))))
+  (with-temp-buffer
+    (insert "[**bold**](url)")
+    (agent-shell-markdown-replace-markup :force t)
+    (should (equal (agent-shell-markdown-reconstruct (point-min) (point-max))
+                   "[**bold**](url)"))
+    (should (get-text-property (point-min) 'keymap))))
 
 (ert-deftest agent-shell-markdown-convert-link-after-image-not-confused ()
   ;; `[X](Y)' inside `![X](Y)' must not be treated as a link.
@@ -533,8 +764,7 @@ it is still picked up by the bare-URL linkifier."
       (delete-file image-file))))
 
 (ert-deftest agent-shell-markdown-remote-image-link-hints-open-key ()
-  ;; A remote image that falls back to a link hints at the browser rather
-  ;; than at opening a file, since that's what invoking it does.
+  ;; A remote image that falls back to a link hints like any other link.
   (let ((rendered (agent-shell-markdown-convert
                    "![docs](https://example.com/a.png)"))
         (echoed nil))
@@ -543,60 +773,46 @@ it is still picked up by the bare-URL linkifier."
                  (setq echoed (apply #'format format-string args)))))
       (funcall (seq-first (get-text-property 0 'cursor-sensor-functions rendered))
                nil nil 'entered)
-      (should (equal "Press RET to open image in browser" echoed)))))
+      (should (equal "Press RET to open: https://example.com/a.png"
+                     echoed)))))
 
-(ert-deftest agent-shell-markdown-link-hints-where-it-lands ()
-  ;; A link looks actionable (link face), but not where invoking it goes: `agent-shell-markdown--open-link' visits local
-  ;; files in Emacs and sends everything else to the browser.  The hint
-  ;; names that, and is computed on entry so a file appearing or going
-  ;; away later doesn't leave it lying.
-  (let ((linked-file (make-temp-file "agent-shell-test" nil ".el"))
-        (echoed nil))
-    (unwind-protect
-        (cl-letf (((symbol-function 'message)
-                   (lambda (format-string &rest args)
-                     (setq echoed (apply #'format format-string args)))))
-          (let ((rendered (agent-shell-markdown-convert
-                           (format "[code](%s)" linked-file))))
-            (funcall (seq-first (get-text-property
-                                 0 'cursor-sensor-functions rendered))
-                     nil nil 'entered)
-            (should (equal "Press RET to open file" echoed)))
-          (let ((rendered (agent-shell-markdown-convert
-                           "[docs](https://example.com)")))
-            (funcall (seq-first (get-text-property
-                                 0 'cursor-sensor-functions rendered))
-                     nil nil 'entered)
-            (should (equal "Press RET to open in browser" echoed))))
-      (delete-file linked-file))))
+(ert-deftest agent-shell-markdown-link-hints-its-target ()
+  ;; A link's text needn't match where it goes, so the hint names the
+  ;; target in full, letting it be inspected before opening.
+  (let ((echoed nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (setq echoed (apply #'format format-string args)))))
+      (let ((rendered (agent-shell-markdown-convert
+                       "[code](/tmp/notes.org#L10)")))
+        (funcall (seq-first (get-text-property
+                             0 'cursor-sensor-functions rendered))
+                 nil nil 'entered)
+        (should (equal "Press RET to open: /tmp/notes.org#L10" echoed)))
+      (let ((rendered (agent-shell-markdown-convert
+                       "[docs](https://example.com)")))
+        (funcall (seq-first (get-text-property
+                             0 'cursor-sensor-functions rendered))
+                 nil nil 'entered)
+        (should (equal "Press RET to open: https://example.com" echoed))))))
 
-(ert-deftest agent-shell-markdown-link-help-echo-says-where-it-lands ()
+(ert-deftest agent-shell-markdown-link-help-echo-names-its-target ()
   ;; The mouse gets the same wording the echo area does, minus the key
   ;; (a tooltip naming one is no use to whoever is holding a mouse).
-  ;; `help-echo' is a function, so it resolves on hover like the hint.
-  (let ((linked-file (make-temp-file "agent-shell-test" nil ".el")))
-    (unwind-protect
-        (progn
-          (should (equal "Open file"
-                         (funcall (get-text-property
-                                   0 'help-echo
-                                   (agent-shell-markdown-convert
-                                    (format "[code](%s)" linked-file)))
-                                  nil nil 0)))
-          (should (equal "Open in browser"
-                         (funcall (get-text-property
-                                   0 'help-echo
-                                   (agent-shell-markdown-convert
-                                    "[docs](https://example.com)"))
-                                  nil nil 0)))
-          ;; A remote image falling back to a link keeps its own wording.
-          (should (equal "Open image in browser"
-                         (funcall (get-text-property
-                                   0 'help-echo
-                                   (agent-shell-markdown-convert
-                                    "![docs](https://example.com/a.png)"))
-                                  nil nil 0))))
-      (delete-file linked-file))))
+  (should (equal "Open: /tmp/notes.org#L10"
+                 (get-text-property
+                  0 'help-echo
+                  (agent-shell-markdown-convert "[code](/tmp/notes.org#L10)"))))
+  (should (equal "Open: https://example.com"
+                 (get-text-property
+                  0 'help-echo
+                  (agent-shell-markdown-convert "[docs](https://example.com)"))))
+  ;; So does a remote image falling back to a link.
+  (should (equal "Open: https://example.com/a.png"
+                 (get-text-property
+                  0 'help-echo
+                  (agent-shell-markdown-convert
+                   "![docs](https://example.com/a.png)")))))
 
 (ert-deftest agent-shell-markdown-image-help-echo-names-the-action ()
   ;; Images say the same to the mouse, leaving resizing out since it has
@@ -977,6 +1193,82 @@ reference tests use would not catch a resolution gone wrong."
                             (match-beginning 0))))))
       (delete-directory directory t))))
 
+(ert-deftest agent-shell-markdown-open-link-at-point-test ()
+  "Test `agent-shell-markdown-open-link-at-point' opens a citation.
+
+It lands on the cited line and column, and `xref-go-back' returns to
+the citation, as after any other jump."
+  (let* ((directory (make-temp-file "agent-shell-refs" t))
+         (default-directory (file-name-as-directory directory))
+         (file (expand-file-name "foo.el"))
+         (origin (generate-new-buffer "*agent-shell-origin*")))
+    (unwind-protect
+        (with-selected-window (frame-first-window)
+          (save-window-excursion
+            (with-temp-file file (insert "one\ntwo\nthree\n"))
+            (switch-to-buffer origin)
+            (insert "see foo.el:3:2 here")
+            (agent-shell-markdown-replace-markup :complete t)
+            (goto-char 7)
+            (call-interactively #'agent-shell-markdown-open-link-at-point)
+            (should (equal (file-truename file)
+                           (file-truename (or (buffer-file-name) ""))))
+            (should (= 3 (line-number-at-pos)))
+            (should (= 1 (current-column)))
+            (xref-go-back)
+            (should (eq origin (current-buffer)))
+            (should (= 7 (point)))))
+      (kill-buffer origin)
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
+      (delete-directory directory t))))
+
+(ert-deftest agent-shell-markdown-xref-find-definitions-test ()
+  "Test \\[xref-find-definitions] on a citation visits it.
+
+Through `agent-shell-markdown-xref-backend', landing on the cited line
+and column, with `xref-go-back' returning to the citation."
+  (let* ((directory (make-temp-file "agent-shell-refs" t))
+         (default-directory (file-name-as-directory directory))
+         (file (expand-file-name "foo.el"))
+         (origin (generate-new-buffer "*agent-shell-origin*")))
+    (unwind-protect
+        (with-selected-window (frame-first-window)
+          (save-window-excursion
+            (with-temp-file file (insert "one\ntwo\nthree\n"))
+            (switch-to-buffer origin)
+            (add-hook 'xref-backend-functions
+                      #'agent-shell-markdown-xref-backend nil t)
+            (insert "see foo.el:3:2 here")
+            (agent-shell-markdown-replace-markup :complete t)
+            (goto-char 7)
+            (should (eq 'agent-shell-markdown (xref-find-backend)))
+            (xref-find-definitions (xref-backend-identifier-at-point
+                                    (xref-find-backend)))
+            (should (equal (file-truename file)
+                           (file-truename (or (buffer-file-name) ""))))
+            (should (= 3 (line-number-at-pos)))
+            (should (= 1 (current-column)))
+            (xref-go-back)
+            (should (eq origin (current-buffer)))
+            (should (= 7 (point)))))
+      (kill-buffer origin)
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
+      (delete-directory directory t))))
+
+(ert-deftest agent-shell-markdown-xref-backend-steps-aside-test ()
+  "Test `agent-shell-markdown-xref-backend' is nil off a local file link.
+That leaves \\[xref-find-definitions] to the next backend."
+  (with-temp-buffer
+    (insert (agent-shell-markdown-convert "see [docs](https://example.com) here"))
+    (goto-char (point-min))
+    (should-not (agent-shell-markdown-xref-backend))
+    (search-forward "docs")
+    (goto-char (match-beginning 0))
+    (should (agent-shell-markdown-link-url-at-point))
+    (should-not (agent-shell-markdown-xref-backend))))
+
 (ert-deftest agent-shell-markdown-linkify-file-reference-forms ()
   ;; The forms agents write: a line, a range, a line and column, and
   ;; GitHub's anchor.
@@ -1108,6 +1400,7 @@ for anything."
           (agent-shell-markdown-replace-markup)
           (should (equal (format "%s:1-4" file)
                          (agent-shell-markdown-link-url-at-point 5)))
+          (should-not (get-text-property 5 'browse-url-data))
           ;; Redone, not composed with itself.
           (should (equal 'agent-shell-markdown-link (get-text-property 5 'face))))
       (delete-file file))))
@@ -1127,6 +1420,8 @@ for anything."
     (agent-shell-markdown-replace-markup)
     (should (equal "https://example.com/foo/bar"
                    (agent-shell-markdown-link-url-at-point 5)))
+    (should (equal "https://example.com/foo/bar"
+                   (get-text-property 5 'browse-url-data)))
     ;; The whole URL is faced, and faced once.
     (should (equal 'agent-shell-markdown-link (get-text-property 5 'face)))
     (should (equal 'agent-shell-markdown-link (get-text-property 30 'face)))
@@ -1169,8 +1464,8 @@ not just linkify, so this walks the whole way in."
           (should (agent-shell-markdown--open-local-link (concat file ":3:4")))
           (should (equal 3 (line-number-at-pos (point))))
           (should (equal 3 (current-column))))
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (ert-deftest agent-shell-markdown-visit-file-with-column-test ()
@@ -1188,8 +1483,8 @@ for its end."
           (agent-shell-markdown-visit-file :file file :line-start 1 :column 99)
           (should (equal 1 (line-number-at-pos (point))))
           (should (equal 3 (current-column))))
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (ert-deftest agent-shell-markdown-remote-image-fallback-is-a-link ()
@@ -1891,6 +2186,34 @@ print(\"hi\")
 
 "))))
 
+(ert-deftest agent-shell-markdown-replace-markup-streamed-nested-fences ()
+  ;; Streaming the same nested markdown must render it like the whole
+  ;; text does.  While the outer 4-backtick fence is still open, the
+  ;; complete inner ```elisp block must not render as its own panel,
+  ;; nor may inline markup after it.
+  (with-temp-buffer
+    (insert "````markdown\nSee `x`.\n\n```elisp\n(setq a 1)\n```\n")
+    (agent-shell-markdown-replace-markup)
+    (should-not (string-match-p "⧉" (buffer-string)))
+    (insert "\nIt's **bold**.\n")
+    (agent-shell-markdown-replace-markup)
+    (should-not (string-match-p "⧉" (buffer-string)))
+    (insert "````\n")
+    (agent-shell-markdown-replace-markup)
+    (should (equal (substring-no-properties (buffer-string))
+                   "
+markdown ⧉
+
+See `x`.
+
+```elisp
+(setq a 1)
+```
+
+It's **bold**.
+
+"))))
+
 (ert-deftest agent-shell-markdown-convert-source-block-with-language ()
   ;; `emacs-lisp' source block: fences deleted, an "emacs-lisp ⧉"
   ;; header is inserted as buffer text bracketed by tinted vpad
@@ -1939,6 +2262,23 @@ print(\"hi\")
          "" "agent-shell-markdown-tests"))
       (should-not highlighted-mode-hook-ran)
       (should observer-hook-ran))))
+
+(ert-deftest agent-shell-markdown-source-block-fontifies-last-diff-line ()
+  "A diff block's last line gets diff faces like the lines before it."
+  (let ((rendered (agent-shell-markdown-convert "```diff
++ first
++ last
+```")))
+    (dolist (line '("+ first" "+ last"))
+      (let ((pos (string-search line rendered)))
+        (should (memq 'diff-indicator-added
+                      (ensure-list (get-text-property pos 'face rendered))))
+        (should (memq 'diff-added
+                      (ensure-list (get-text-property (+ pos 2) 'face rendered))))))))
+
+(ert-deftest agent-shell-markdown-highlight-code-keeps-code-length ()
+  "Highlighting returns exactly CODE's characters, with no added newline."
+  (should (equal (agent-shell-markdown--highlight-code "+ a" "diff") "+ a")))
 
 (ert-deftest agent-shell-markdown-convert-source-block-body-tagged ()
   ;; Body chars carry `agent-shell-markdown-frozen t' so subsequent calls
@@ -2155,7 +2495,7 @@ Outro"))))
   ;; no framing blank line is added at the buffer edges.
   (with-temp-buffer
     (insert "| a | b |\n|---|---|\n| 1 | 2 |")
-    (agent-shell-markdown-replace-markup)
+    (agent-shell-markdown-replace-markup :complete t)
     (should (equal (substring-no-properties (buffer-string))
                    "│ a │ b │
 ├───┼───┤
@@ -2328,33 +2668,31 @@ Outro"))))
                      "• one\n• two\n")))))
 
 (ert-deftest agent-shell-markdown-list-items-not-split-when-rendered-separately ()
-  ;; Regression: streaming under a body narrow renders a last item early
-  ;; (before its trailing newline arrives), so that newline lands
+  ;; Regression: a complete render under a body narrow renders a last
+  ;; item before its trailing newline arrives, so that newline lands
   ;; untagged between two rendered list lines, splitting the list into
   ;; two runs.  Framing must still treat them as one block and not
   ;; strand a blank between the items.  The body narrow here excludes a
-  ;; trailing newline (as a fragment body does), which is what triggers
-  ;; the early render.
+  ;; trailing newline, as a fragment body does.
   (let ((agent-shell-markdown-list-bullets '("•")))
     (with-temp-buffer
       (insert "- one\n")
       (save-restriction (narrow-to-region (point-min) (1- (point-max)))
-                        (agent-shell-markdown-replace-markup))
+                        (agent-shell-markdown-replace-markup :complete t))
       (goto-char (1- (point-max)))
       (insert "\n- two")
       (save-restriction (narrow-to-region (point-min) (1- (point-max)))
-                        (agent-shell-markdown-replace-markup))
+                        (agent-shell-markdown-replace-markup :complete t))
       (should (equal (substring-no-properties (buffer-string))
                      "• one\n• two\n")))))
 
 (ert-deftest agent-shell-markdown-list-item-not-split-when-line-streams-in-parts ()
-  ;; Regression: a chunk can end mid-item, so the last-line handler
-  ;; renders that item before its whole line has streamed in; its
-  ;; rendered span ends partway through the line and the rest arrives
-  ;; untagged.  Framing must still fold the item's whole line into the
-  ;; block and not strand a blank between it and the next item.  Uses a
-  ;; body narrow (excluding a trailing newline) to trigger the early
-  ;; render, and splits item one mid-line like the real stream did.
+  ;; Regression: a chunk can end mid-item.  Framing must fold the
+  ;; item's whole line into the block once it completes, and not strand
+  ;; a blank between it and the next item, rendered when the stream
+  ;; completes.  Uses a body narrow (excluding a trailing newline), as a
+  ;; fragment body does, and splits item one mid-line like the real
+  ;; stream did.
   (let ((agent-shell-markdown-list-bullets '("•")))
     (with-temp-buffer
       (insert "\n")
@@ -2365,7 +2703,7 @@ Outro"))))
       (goto-char (1- (point-max)))
       (insert "rest)\n- two")
       (save-restriction (narrow-to-region (point-min) (1- (point-max)))
-                        (agent-shell-markdown-replace-markup))
+                        (agent-shell-markdown-replace-markup :complete t))
       (should (equal (substring-no-properties
                       (buffer-substring (point-min) (1- (point-max))))
                      "• one (rest)\n• two")))))
@@ -2428,19 +2766,14 @@ Outro"))))
       (should (equal (substring-no-properties (buffer-string))
                      "intro\n\n• A\n• B\n\nafter\n")))))
 
-(ert-deftest agent-shell-markdown-list-last-line-renders-under-narrow ()
-  ;; Regression: a fragment body is rendered narrowed to its content, so
-  ;; a list item on the last line has its terminating newline just
-  ;; outside the narrow.  The newline-anchored pass would leave that last
-  ;; item raw; it must still render, since a newline exists right past
-  ;; the narrow (the line is complete).
+(ert-deftest agent-shell-markdown-list-last-line-renders-when-complete ()
+  ;; Regression: a response ending in a list item with no newline after
+  ;; it.  The newline-anchored pass leaves that last item raw, so a
+  ;; render marked complete (nothing more is coming) must render it.
   (let ((agent-shell-markdown-list-bullets '("•")))
     (with-temp-buffer
-      (insert "Sources:\n\n- First item\n- Last item\n")
-      (save-restriction
-        ;; Narrow to the body, excluding the last item's trailing newline.
-        (narrow-to-region (point-min) (1- (point-max)))
-        (agent-shell-markdown-replace-markup))
+      (insert "Sources:\n\n- First item\n- Last item")
+      (agent-shell-markdown-replace-markup :complete t)
       (goto-char (point-max))
       (search-backward "Last item")
       (goto-char (line-beginning-position))
@@ -2449,6 +2782,29 @@ Outro"))))
       ;; Source is stashed whole, so copy-as-markdown round-trips.
       (should (equal (get-text-property (point) 'agent-shell-markdown-source)
                      "- Last item")))))
+
+(ert-deftest agent-shell-markdown-list-last-line-raw-under-padded-narrow ()
+  ;; Regression for issue #867: a fragment body is rendered narrowed,
+  ;; with the fragment's padding newlines just past the narrow.  Those
+  ;; say nothing about the body's last line, so an item there stays raw
+  ;; while streaming.  Rendering it early stashed `- **Bold' as its
+  ;; source, and the rest of the line streaming in after was lost from
+  ;; copy-as-markdown.
+  (let ((agent-shell-markdown-list-bullets '("•")))
+    (with-temp-buffer
+      (insert "- **Bold\n\n")
+      (save-restriction
+        (narrow-to-region (point-min) (- (point-max) 2))
+        (agent-shell-markdown-replace-markup)
+        (goto-char (point-min))
+        (should (eq (char-after) ?-))
+        (goto-char (point-max))
+        (insert " lead:** Normal text.\n")
+        (agent-shell-markdown-replace-markup)
+        (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                       "• Bold lead: Normal text.\n"))
+        (should (equal (agent-shell-markdown-reconstruct (point-min) (point-max))
+                       "- **Bold lead:** Normal text.\n"))))))
 
 (ert-deftest agent-shell-markdown-list-last-line-raw-while-streaming ()
   ;; The last line with no newline anywhere after it is a still-streaming
@@ -2626,13 +2982,15 @@ after" nil)))))
 
 (ert-deftest agent-shell-markdown-convert-table-cell-uses-bold ()
   ;; Bold inside a cell is processed by the main pass; the rendered
-  ;; table preserves the bold face on \"Alice\".
+  ;; table keeps the bold face on \"Alice\", stacked over the data
+  ;; row's own face.
   (let* ((s (agent-shell-markdown-convert "| Name | Role |
 |------|------|
 | **Alice** | Engineer |"))
          (alice-pos (string-match "Alice" s)))
     (should alice-pos)
-    (should (eq 'agent-shell-markdown-bold (get-text-property alice-pos 'face s)))))
+    (should (equal '(agent-shell-markdown-bold agent-shell-markdown-table)
+                   (get-text-property alice-pos 'face s)))))
 
 (ert-deftest agent-shell-markdown-table-leaves-cell-link-keys-alone ()
   ;; Cells hold whatever the inline passes rendered, links included.  A
@@ -2656,7 +3014,7 @@ after" nil)))))
         (funcall (seq-first (get-text-property
                              link-start 'cursor-sensor-functions rendered))
                  nil nil 'entered)
-        (should (equal "Press RET to open in browser" echoed))))))
+        (should (equal "Press RET to open: https://example.com" echoed))))))
 
 (ert-deftest agent-shell-markdown-convert-table-skips-frozen-cell-pipe ()
   ;; `| `a|b` | c |' — inline-code body contains a `|', which our
@@ -2923,7 +3281,7 @@ after" nil)))))
   ;; smear the first char's `font-lock-face' (a border) across every
   ;; cell.  A fresh render mirrors each cell's `face' to `font-lock-face'
   ;; on its own, so header cells stay `table-header' and plain data
-  ;; cells stay unstyled rather than all going border-grey.
+  ;; cells stay `table' rather than all going border-grey.
   (with-temp-buffer
     (insert "| A | B |\n|---|---|\n| 1 | 2 |\n")
     (agent-shell-markdown-replace-markup)
@@ -2942,17 +3300,66 @@ after" nil)))))
        (list (cons :source (prop-match-value region))
              (cons :start (prop-match-beginning region))
              (cons :end (prop-match-end region)))))
-    ;; Header cell recovers its header face; a plain data cell has no
-    ;; border font-lock-face smeared onto it.
+    ;; Header cell recovers its header face; a plain data cell gets its
+    ;; table face back rather than the smeared border face.
     (should (eq (get-text-property
                  (save-excursion (goto-char (point-min))
                                  (1- (search-forward "A")))
                  'font-lock-face)
                 'agent-shell-markdown-table-header))
-    (should (null (get-text-property
-                   (save-excursion (goto-char (point-min))
-                                   (1- (search-forward "1")))
-                   'font-lock-face)))))
+    (should (eq (get-text-property
+                 (save-excursion (goto-char (point-min))
+                                 (1- (search-forward "1")))
+                 'font-lock-face)
+                'agent-shell-markdown-table))))
+
+(defun agent-shell-markdown-tests--table-cell-faces (markdown cells)
+  "Return the `face' property each of CELLS carries once MARKDOWN renders.
+CELLS holds the text to search for, one entry per row.  For example,
+rendering \"| A |\\n|---|\\n| 1 |\\n| 2 |\\n\" with CELLS (\"1\" \"2\")
+returns (agent-shell-markdown-table agent-shell-markdown-table-zebra)."
+  (with-temp-buffer
+    (insert markdown)
+    (agent-shell-markdown-replace-markup)
+    (seq-map (lambda (cell)
+               (goto-char (point-min))
+               (search-forward cell)
+               (get-text-property (1- (point)) 'face))
+             cells)))
+
+(ert-deftest agent-shell-markdown-table-every-data-row-carries-a-face ()
+  ;; Plain data rows carry the table face and alternating rows the zebra
+  ;; face, so no data row is left unfaced.  `mixed-pitch-mode' and
+  ;; similar remap fonts per face, so an unfaced row can't be kept in
+  ;; the table's font and misaligns.
+  (should (equal (agent-shell-markdown-tests--table-cell-faces
+                  "| A |\n|---|\n| 1 |\n| 2 |\n| 3 |\n" '("1" "2" "3"))
+                 '(agent-shell-markdown-table
+                   agent-shell-markdown-table-zebra
+                   agent-shell-markdown-table)))
+  ;; With striping off, every data row is a plain row.
+  (let ((agent-shell-markdown-table-zebra-stripe nil))
+    (should (equal (agent-shell-markdown-tests--table-cell-faces
+                    "| A |\n|---|\n| 1 |\n| 2 |\n| 3 |\n" '("1" "2" "3"))
+                   '(agent-shell-markdown-table
+                     agent-shell-markdown-table
+                     agent-shell-markdown-table)))))
+
+(ert-deftest agent-shell-markdown-table-faces-inherit-the-table-face ()
+  ;; The header, border and zebra faces all resolve through
+  ;; `agent-shell-markdown-table', which is what lets a face-remapping
+  ;; setup pin a whole table by naming that one face.  It comes last in
+  ;; the header and zebra inherit lists, so their own styling still
+  ;; wins, but first in the border's, so a font a theme sets on
+  ;; `font-lock-comment-face' can't size borders apart from the cells
+  ;; (issue #868).
+  (dolist (face '(agent-shell-markdown-table-header
+                  agent-shell-markdown-table-zebra))
+    (should (equal (seq-drop (face-attribute face :inherit) 1)
+                   '(agent-shell-markdown-table))))
+  (should (equal (car (face-attribute 'agent-shell-markdown-table-border
+                                      :inherit))
+                 'agent-shell-markdown-table)))
 
 (ert-deftest agent-shell-markdown-table-sizes-against-destination-window ()
   ;; Regression: column allocation must size against the table's
@@ -3041,6 +3448,45 @@ after" nil)))))
 │ 2 │ Bob   │ Designer │ UK      │ Historical │
 "))))
 
+(ert-deftest agent-shell-markdown-table-styles-markup-split-across-row-chunks ()
+  ;; A chunk ending at a cell's `|' (`| Commit |') looks like a whole
+  ;; row.  Rendering it then would commit the rest of the row as raw
+  ;; continuation chunks, so a link or inline code split across two of
+  ;; them would never be styled and its raw markup would widen the
+  ;; column (issue #868).
+  (dolist (chunks '(("| A | B |\n|---|---|\n| x | y |\n| Commit |"
+                     " [abc" "](https://github.com/x" "yz) |\n")
+                    ("| A | B |\n|---|---|\n| x | y |\n| Code |"
+                     " `(require 'init-org" ")` |\n")))
+    (with-temp-buffer
+      (dolist (chunk chunks)
+        (goto-char (point-max))
+        (insert chunk)
+        (agent-shell-markdown-replace-markup))
+      (should (equal (substring-no-properties (buffer-string))
+                     (with-temp-buffer
+                       (insert (apply #'concat chunks))
+                       (agent-shell-markdown-replace-markup)
+                       (substring-no-properties (buffer-string))))))))
+
+(ert-deftest agent-shell-markdown-table-keeps-styling-refontified-while-pending ()
+  ;; A row styled while it waits for its newline can be re-fontified
+  ;; before it folds into the table, clearing `face' and leaving only
+  ;; the mirrored `font-lock-face'.  The table must still pick up the
+  ;; styling (issue #868).
+  (with-temp-buffer
+    (dolist (chunk '("| A | B |\n|---|---|\n| x | y |\n| S |" " ~~old~~ |" "\n"))
+      (goto-char (point-max))
+      (insert chunk)
+      (agent-shell-markdown-replace-markup)
+      ;; What re-fontification does to `face' between chunks.
+      (remove-text-properties (point-min) (point-max) '(face nil)))
+    (goto-char (point-min))
+    (search-forward "old")
+    (should (memq 'agent-shell-markdown-strikethrough
+                  (ensure-list (get-text-property (match-beginning 0)
+                                                  'font-lock-face))))))
+
 (ert-deftest agent-shell-markdown-table-inside-open-fence-stays-raw ()
   ;; A table inside a fenced block whose closing fence hasn't
   ;; streamed in yet must NOT get table-rendered.  Otherwise the
@@ -3061,9 +3507,10 @@ after" nil)))))
     (should-not (string-match-p "│" (buffer-string)))))
 
 (ert-deftest agent-shell-markdown-table-renders-final-row-without-trailing-newline ()
-  ;; A complete table whose last row isn't terminated by `\n' (e.g.
-  ;; the final chunk of a streaming response) must still render —
-  ;; callers like agent-shell narrow to the body section, which
+  ;; A table whose last row isn't terminated by `\n' (e.g. the final
+  ;; chunk of a streaming response) leaves that row raw while more
+  ;; text may follow, and renders it once the render is complete.
+  ;; Callers like agent-shell narrow to the body section, which
   ;; excludes the trailing `\n', so even when streaming has stopped
   ;; the row would appear unterminated within the narrow.
   (with-temp-buffer
@@ -3072,6 +3519,12 @@ after" nil)))))
 | Alice | 28 |
 | Bob | 35 |")
     (agent-shell-markdown-replace-markup)
+    (should (equal (substring-no-properties (buffer-string))
+                   "│ Name  │ Age │
+├───────┼─────┤
+│ Alice │ 28  │
+| Bob | 35 |"))
+    (agent-shell-markdown-replace-markup :complete t)
     (should (equal (substring-no-properties (buffer-string))
                    "│ Name  │ Age │
 ├───────┼─────┤
@@ -3283,6 +3736,17 @@ after" nil)))))
   ;; unchanged.  The function still returns a string.
   (should (stringp
            (agent-shell-markdown--table-apply-height-scaling "⚠️ Review"))))
+
+(ert-deftest agent-shell-markdown-table-measure-line-height-leaves-window-alone ()
+  ;; Regression: measuring must not show its buffer in the window, which
+  ;; would run the window's hooks in the middle of rendering.
+  (let* ((calls 0)
+         (window-scroll-functions (list (lambda (&rest _) (setq calls (1+ calls)))))
+         (buffer (window-buffer)))
+    (save-window-excursion
+      (agent-shell-markdown--table-measure-line-height (selected-window) "A")
+      (should (eq (window-buffer) buffer))
+      (should (= calls 0)))))
 
 (ert-deftest agent-shell-markdown-table-next-cell-walks-cells-in-order ()
   ;; Cells walk row-by-row, skipping the separator, and signal
@@ -3568,9 +4032,9 @@ A " nil)
              ("
 " nil)
              ("│" (agent-shell-markdown-table-border))
-             (" 1 " nil)
+             (" 1 " (agent-shell-markdown-table))
              ("│" (agent-shell-markdown-table-border))
-             (" 2 " nil)
+             (" 2 " (agent-shell-markdown-table))
              ("│" (agent-shell-markdown-table-border))))))
 
 (ert-deftest agent-shell-markdown-watermark-skips-prefix-on-streamed-append ()
@@ -3651,6 +4115,30 @@ A " nil)
                               'face 'agent-shell-markdown-blockquote)))
     (should (eq (get-text-property (+ (point-min) 2) 'face)
                 'agent-shell-markdown-blockquote))))
+
+(ert-deftest agent-shell-markdown-blockquote-renders-last-line-when-complete ()
+  ;; A response ending on a quoted line never gets its newline, so a
+  ;; complete render must not hold that line back.
+  (with-temp-buffer
+    (insert "> a\n>\n> b")
+    (agent-shell-markdown-replace-markup)
+    (should-not (get-text-property (- (point-max) 3) 'display))
+    (agent-shell-markdown-replace-markup :complete t)
+    (should (equal (substring-no-properties (buffer-string)) "> a\n>\n> b"))
+    (should (equal (get-text-property (- (point-max) 3) 'display)
+                   (propertize "▌" 'face 'agent-shell-markdown-blockquote)))
+    (should (eq (get-text-property (1- (point-max)) 'face)
+                'agent-shell-markdown-blockquote))))
+
+(ert-deftest agent-shell-markdown-header-renders-last-line-when-complete ()
+  (with-temp-buffer
+    (insert "Intro\n\n## Title")
+    (agent-shell-markdown-replace-markup)
+    (should (equal (substring-no-properties (buffer-string)) "Intro\n\n## Title"))
+    (agent-shell-markdown-replace-markup :complete t)
+    (should (equal (agent-shell-markdown--deconstruct (buffer-string))
+                   '(("Intro\n\n" nil)
+                     ("Title" (agent-shell-markdown-header-2)))))))
 
 (ert-deftest agent-shell-markdown-blockquote-inside-fence-stays-raw ()
   ;; A `>'-prefixed line inside a fenced code block must not be
@@ -4016,8 +4504,8 @@ unaffected."
           ;; (/var vs /private/var on macOS) depending on config.
           (should (equal (file-truename file)
                          (file-truename (buffer-file-name)))))
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (ert-deftest agent-shell-markdown-visit-file-with-line-range-selects-region-test ()
@@ -4030,8 +4518,8 @@ unaffected."
                          (file-truename (buffer-file-name))))
           (should (equal "two\nthree"
                          (buffer-substring-no-properties (point) (mark)))))
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (ert-deftest agent-shell-markdown-visit-file-pushes-xref-marker-test ()
@@ -4055,8 +4543,8 @@ for where they were in the conversation."
             (should (eq origin (current-buffer)))
             (should (= 5 (point)))))
       (kill-buffer origin)
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (ert-deftest agent-shell-markdown-visit-file-no-window-pushes-nothing-test ()
@@ -4072,8 +4560,8 @@ left."
           (let ((agent-shell-markdown-open-file-function (lambda (_path) nil)))
             (agent-shell-markdown-visit-file :file file :line-start 2))
           (should-not pushed))
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (ert-deftest agent-shell-markdown-open-file-returns-window-test ()
@@ -4082,8 +4570,8 @@ left."
     (unwind-protect
         (save-window-excursion
           (should (windowp (agent-shell-markdown-open-file file))))
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (ert-deftest agent-shell-markdown-visit-file-rejects-non-window-test ()
@@ -4097,8 +4585,8 @@ leave point somewhere the user can't see rather than fail."
                (lambda (path) (find-file-noselect path))))
           (should-error (agent-shell-markdown-visit-file :file file :line-start 2)
                         :type 'user-error))
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (ert-deftest agent-shell-markdown-visit-file-tolerates-no-window-test ()
@@ -4107,8 +4595,8 @@ leave point somewhere the user can't see rather than fail."
     (unwind-protect
         (let ((agent-shell-markdown-open-file-function (lambda (_path) nil)))
           (should-not (agent-shell-markdown-visit-file :file file :line-start 2)))
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (ert-deftest agent-shell-markdown--open-local-link-binary-vs-text-test ()
@@ -4179,6 +4667,20 @@ plainer `#L10-24' both have to land."
           (should-not (agent-shell-markdown--parse-local-link (concat file "#L2xy"))))
       (delete-file file))))
 
+(ert-deftest agent-shell-markdown--parse-local-link-remote-url-test ()
+  "Test `agent-shell-markdown--parse-local-link' leaves remote URLs alone.
+
+With `url-handler-mode' on, `file-exists-p' on an https URL makes a
+network request, so remote URLs must be rejected before it runs."
+  (cl-letf (((symbol-function 'file-exists-p)
+             (lambda (file)
+               (error "Unexpected `file-exists-p' on %s" file))))
+    (should-not (agent-shell-markdown--parse-local-link
+                 "https://gitlab.com/group/project/-/merge_requests/7338"))
+    (should-not (agent-shell-markdown--parse-local-link "http://example.com/foo.el#L10"))
+    (should-not (agent-shell-markdown--parse-local-link "ftp://example.com/foo.el:3"))
+    (should-not (agent-shell-markdown--parse-local-link "git+ssh://example.com/repo"))))
+
 (ert-deftest agent-shell-markdown--open-local-link-selects-range-test ()
   "Test `agent-shell-markdown--open-local-link' selects a linked range.
 
@@ -4199,8 +4701,8 @@ it, what it now spans is neither jump's."
           (should (agent-shell-markdown--open-local-link (concat file "#L3")))
           (should (equal 3 (line-number-at-pos (point))))
           (should-not mark-active))
-      (when (get-file-buffer file)
-        (kill-buffer (get-file-buffer file)))
+      (when (find-buffer-visiting file)
+        (kill-buffer (find-buffer-visiting file)))
       (delete-file file))))
 
 (defun agent-shell-markdown-tests--source-blocks (markdown)
@@ -4316,6 +4818,59 @@ exercised by the editing in the -all-math-cases test.)"
                            (match-beginning 0))))
         (agent-shell-markdown-replace-markup)
         (should (= (agent-shell-markdown--watermark-start) open-dollar))))))
+
+(ert-deftest agent-shell-markdown-render-functions-protect-pending-markup-test ()
+  "The earliest external frontier protects unfinished markup this pass."
+  (with-temp-buffer
+    (let* ((prefix "intro\n")
+           (pending "$$\n**pending** and \\_literal\\_\nmore\n")
+           (frontier (+ (point-min) (length prefix)))
+           (agent-shell-markdown-render-functions
+            (list (lambda (_context)
+                    (list (cons :watermark (+ frontier 4))))
+                  #'ignore
+                  (lambda (_context)
+                    (list (cons :watermark frontier))))))
+      (insert prefix pending)
+      (agent-shell-markdown-replace-markup :render-images nil)
+      ;; Neither emphasis nor escape decoding may consume pending input.
+      (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                     (concat prefix pending)))
+      (should (= (agent-shell-markdown--watermark-start) frontier))
+      ;; Once the external renderer releases its frontier, revisit the tail.
+      (let ((agent-shell-markdown-render-functions nil))
+        (agent-shell-markdown-replace-markup :render-images nil))
+      (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                     "intro\n$$\npending and _literal_\nmore\n")))))
+
+(ert-deftest agent-shell-markdown-render-functions-watermark-before-narrow-test ()
+  "An external frontier behind the watermark leaves earlier text alone."
+  (with-temp-buffer
+    (insert "**behind**\n**tail**\n")
+    ;; Stamp the watermark past `**behind**' so this pass starts at `**tail**'.
+    (put-text-property (point-min) (1+ (point-min))
+                       'agent-shell-markdown-watermark 11)
+    (let ((agent-shell-markdown-render-functions
+           (list (lambda (_context)
+                   (list (cons :watermark 1))))))
+      (agent-shell-markdown-replace-markup :render-images nil))
+    (should (equal (buffer-substring-no-properties (point-min) (point-max))
+                   "**behind**\n**tail**\n"))))
+
+(ert-deftest agent-shell-markdown-fontification-bookkeeping-is-silent-test ()
+  "Fontification properties do not fire change hooks or dirty the buffer."
+  (dolist (modified '(nil t))
+    (with-temp-buffer
+      (insert (propertize "plain text" 'face 'bold))
+      (set-buffer-modified-p modified)
+      (let* ((changes 0)
+             (after-change-functions
+              (list (lambda (&rest _) (setq changes (1+ changes))))))
+        (agent-shell-markdown-replace-markup :render-images nil)
+        (should (= changes 0))
+        (should (eq (buffer-modified-p) modified))
+        (should (eq (get-text-property (point-min) 'font-lock-face) 'bold))
+        (should (eq (get-text-property (point-min) 'fontified) t))))))
 
 (ert-deftest agent-shell-markdown-render-functions-all-math-cases ()
   ;; A renderer that claims every math form the PR supports and wraps its
@@ -4536,6 +5091,114 @@ for a fully-selected buffer."
     (goto-char (point-min))
     (search-forward "⧉")
     (should-not (agent-shell-markdown-source-block-at-point (1- (point))))))
+
+(defun agent-shell-markdown-tests--first-file-reference (text)
+  "Return the first bare `path:line' reference found in TEXT, or nil.
+
+Searches with `case-fold-search' nil, as
+`agent-shell-markdown--linkify-file-references' does."
+  (with-temp-buffer
+    (insert text)
+    (goto-char (point-min))
+    (setq-local case-fold-search nil)
+    (when-let* ((found (agent-shell-markdown--search-file-reference)))
+      (buffer-substring (car found) (cdr found)))))
+
+(ert-deftest agent-shell-markdown-search-file-reference ()
+  ;; What `agent-shell-markdown--search-file-reference' finds is what a
+  ;; regexp for the whole reference would, with the path read back from
+  ;; the location rather than matched forward.
+  (should (equal "docs/audit.md:500"
+                 (agent-shell-markdown-tests--first-file-reference
+                  "see docs/audit.md:500 now")))
+  (should (equal "foo.el#L12-L14"
+                 (agent-shell-markdown-tests--first-file-reference
+                  "at foo.el#L12-L14 here")))
+  ;; A path does not start with `+' or `-'.
+  (should (equal "foo.el:12"
+                 (agent-shell-markdown-tests--first-file-reference
+                  "--foo.el:12")))
+  ;; No path before the separator, but its location holds one.
+  (should (equal "1:1"
+                 (agent-shell-markdown-tests--first-file-reference ":1:1")))
+  (should (null (agent-shell-markdown-tests--first-file-reference
+                 "meeting at :30")))
+  (should (null (agent-shell-markdown-tests--first-file-reference
+                 "no reference here")))
+  ;; The separator is `#L', not `#l', so case matters.
+  (should (null (agent-shell-markdown-tests--first-file-reference
+                 "at foo.el#l12 here")))
+  ;; A search finding nothing leaves point where it started, as
+  ;; `re-search-forward' with NOERROR t does.
+  (with-temp-buffer
+    (insert "meeting at :30 and nothing else")
+    (goto-char (point-min))
+    (should (null (agent-shell-markdown--search-file-reference)))
+    (should (= (point) (point-min))))
+  ;; A second search does not read the path back into the first match:
+  ;; `2:3' is not a reference once `a:1:2' has been found.
+  (with-temp-buffer
+    (insert "a:1:2:3")
+    (goto-char (point-min))
+    (should (equal (cons 1 6) (agent-shell-markdown--search-file-reference)))
+    (should (null (agent-shell-markdown--search-file-reference)))))
+
+(ert-deftest agent-shell-markdown-tracking-label-shown-until-opened ()
+  (let* ((directory (make-temp-file "agent-shell-tracking" t))
+         (tracking-file (expand-file-name "nested/links.eld" directory))
+         (markdown "[docs](https://example.com/docs){tracking-label=\"(new)\"} and [other](https://example.com/other)"))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-markdown--open-link) #'ignore))
+          (with-temp-buffer
+            (insert (agent-shell-markdown-convert markdown :tracking-file tracking-file))
+            ;; The label is drawn over the title's last character, never inserted.
+            (should (equal (buffer-string) "docs and other"))
+            (let ((display (get-text-property (length "docs") 'display)))
+              (should (equal (cddr display) "s (new)"))
+              ;; The label does not inherit the link's underline.
+              (should (equal (get-text-property 1 'face (cddr display))
+                             '((:underline nil) agent-shell-markdown-inline-code)))
+              (should (eval (cadr display) t))
+              (agent-shell-markdown-open-link-at-point (point-min))
+              (should (equal (buffer-string) "docs and other"))
+              (should-not (eval (cadr display) t)))
+            ;; Opening again records nothing new.
+            (agent-shell-markdown-open-link-at-point (point-min)))
+          (let ((links (agent-shell-markdown--read-tracked-links tracking-file)))
+            (should (equal (length links) 1))
+            (should (equal (map-elt (seq-first links) :url) "https://example.com/docs"))
+            (should (string-match-p "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}T"
+                                    (map-elt (seq-first links) :opened))))
+          ;; Once opened, a fresh render carries no label at all.
+          (should-not (get-text-property
+                       (length "doc") 'display
+                       (agent-shell-markdown-convert markdown :tracking-file tracking-file))))
+      (delete-directory directory t))))
+
+(ert-deftest agent-shell-markdown-tracking-label-left-literal-without-tracking-file ()
+  (should (equal (substring-no-properties
+                  (agent-shell-markdown-convert
+                   "[docs](https://example.com/docs){tracking-label=\"(new)\"}"))
+                 "docs{tracking-label=\"(new)\"}")))
+
+(ert-deftest agent-shell-markdown-untracked-link-not-recorded ()
+  (let ((tracking-file (make-temp-file "agent-shell-tracking" nil ".eld")))
+    (delete-file tracking-file)
+    (cl-letf (((symbol-function 'agent-shell-markdown--open-link) #'ignore))
+      (with-temp-buffer
+        (insert (agent-shell-markdown-convert "[docs](https://example.com/docs)"
+                                              :tracking-file tracking-file))
+        (agent-shell-markdown-open-link-at-point (point-min))))
+    (should-not (file-exists-p tracking-file))))
+
+(ert-deftest agent-shell-markdown-parse-link-attributes ()
+  (should (equal (agent-shell-markdown--parse-link-attributes
+                  "tracking-label=\"(new) post\"")
+                 '((:tracking-label . "(new) post"))))
+  (should (equal (agent-shell-markdown--parse-link-attributes
+                  ".class tracking-label=new")
+                 '((:tracking-label . "new"))))
+  (should-not (agent-shell-markdown--parse-link-attributes "width=50%")))
 
 (provide 'agent-shell-markdown-tests)
 

@@ -77,20 +77,22 @@ For example, to fold with TAB as well as RET:
 Rebind with `define-key' rather than `setq': already rendered text
 holds on to this keymap object.")
 
-(defun agent-shell-ui--echo-action-hint (verb)
+(defun agent-shell-ui--echo-action-hint (verb &optional command keymap)
   "Echo how to run an action described by VERB.
 
-Searches `agent-shell-ui-fragment-map' for whichever key runs
-`agent-shell-ui-toggle-fragment', skipping mouse bindings so the hint
-names something the user can press.
+Searches KEYMAP for whichever key runs COMMAND, skipping mouse bindings
+so the hint names something the user can press.  COMMAND defaults to
+`agent-shell-ui-toggle-fragment' and KEYMAP to
+`agent-shell-ui-fragment-map', which is the fold chrome; other chrome
+bound to its own shared map passes both.
 
 For example, VERB \"toggle\" echoes \"Press RET to toggle\" with the
 default bindings, or \"Press TAB to toggle\" once that map binds TAB."
   (when-let* ((keys (seq-remove
                      (lambda (key) (mouse-event-p (aref key 0)))
                      (where-is-internal
-                      #'agent-shell-ui-toggle-fragment
-                      (list agent-shell-ui-fragment-map)))))
+                      (or command #'agent-shell-ui-toggle-fragment)
+                      (list (or keymap agent-shell-ui-fragment-map))))))
     (message "Press %s to %s" (key-description (seq-first keys)) verb)))
 
 (defun agent-shell-ui--fragment-help-echo (qualified-id)
@@ -99,6 +101,17 @@ Returns QUALIFIED-ID only when `agent-shell-ui-debug-enabled' is set,
 otherwise nil so the id stays hidden from users."
   (when agent-shell-ui-debug-enabled
     qualified-id))
+
+(defun agent-shell-ui--fragment-help-echo-properties (qualified-id)
+  "Return `help-echo' properties tagging QUALIFIED-ID, or nil to add none.
+
+Applied across a region, a nil `help-echo' does not merely fail to tag
+it: `add-text-properties' sets the property to nil, erasing whatever
+help the region's own content carried.  A body holds arbitrary rendered
+content, which may carry help of its own, so adding no property at all
+is what leaves it in place."
+  (when-let* ((help (agent-shell-ui--fragment-help-echo qualified-id)))
+    (list 'help-echo help)))
 
 (cl-defun agent-shell-ui-make-fragment-model (&key (namespace-id "global") (block-id "1") label-left label-right body group-id group-label (group-expanded t))
   "Create a fragment model alist.
@@ -193,7 +206,7 @@ O(accumulated-body).  Label-only updates leave the body untouched."
                  ;; it still describes the buffer.
                  (cached (unless create-new
                            (agent-shell-ui--cached-block qualified-id)))
-                 (match (unless cached
+                 (match (unless (or cached create-new)
                           (save-mark-and-excursion
                             (goto-char (point-max))
                             (text-property-search-backward
@@ -370,7 +383,8 @@ O(accumulated-body).  Label-only updates leave the body untouched."
                         (header-state (get-text-property (map-elt header :start)
                                                          'agent-shell-ui-state))
                         ((map-elt header-state :collapsed)))
-              (agent-shell-ui--set-group-collapsed group-qid t))
+              (agent-shell-ui--set-group-collapsed
+               :group-qualified-id group-qid :collapsed t))
             (when on-post-process
               (funcall on-post-process))
             (when-let* ((block-range (if block-end
@@ -442,10 +456,10 @@ match.  Explicit `invisible' assignment overrides any value the
 new chars might have inherited via rear-stickiness from preceding
 trailing-whitespace chars."
   (add-text-properties start end
-                       `(agent-shell-ui-section body
-                                                help-echo ,(agent-shell-ui--fragment-help-echo qualified-id)
-                                                read-only t
-                                                front-sticky (read-only)))
+                       (append (list 'agent-shell-ui-section 'body
+                                     'read-only t
+                                     'front-sticky '(read-only))
+                               (agent-shell-ui--fragment-help-echo-properties qualified-id)))
   (when state
     (put-text-property start end 'agent-shell-ui-state state))
   (put-text-property start end 'invisible (if body-invisible t nil)))
@@ -640,10 +654,10 @@ be handed in."
                    :hint "toggle"))
           (let ((insert-end (point)))
             (add-text-properties insert-start insert-end
-                                 `(agent-shell-ui-section ,section
-                                                          help-echo ,(agent-shell-ui--fragment-help-echo qualified-id)
-                                                          read-only t
-                                                          front-sticky (read-only)))
+                                 (append (list 'agent-shell-ui-section section
+                                               'read-only t
+                                               'front-sticky '(read-only))
+                                         (agent-shell-ui--fragment-help-echo-properties qualified-id)))
             (when state
               (put-text-property insert-start insert-end
                                  'agent-shell-ui-state state))))))))
@@ -1016,19 +1030,47 @@ Leaf: hide/show its body per `:collapsed'.  Group: recurse into children."
   (when-let* ((state (get-text-property block-start 'agent-shell-ui-state))
               (block (agent-shell-ui--block-range :position block-start)))
     (if (eq (map-elt state :kind) 'group)
-        (agent-shell-ui--set-group-collapsed (map-elt state :qualified-id)
-                                             (and (map-elt state :collapsed) t))
+        (agent-shell-ui--set-group-collapsed
+         :group-qualified-id (map-elt state :qualified-id)
+         :collapsed (and (map-elt state :collapsed) t))
       (when-let* ((body (agent-shell-ui--nearest-range-matching-property
                          :property 'agent-shell-ui-section :value 'body
                          :from (map-elt block :start) :to (map-elt block :end)))
                   (invisible-start (agent-shell-ui--labels-end block)))
         (put-text-property invisible-start (map-elt body :end)
-                           'invisible (and (map-elt state :collapsed) t))))))
+                           'invisible (and (map-elt state :collapsed) t))
+        ;; Keep trailing newlines hidden on expand, as
+        ;; `agent-shell-ui--toggle-leaf-fragment-at-point' does, so the
+        ;; next child still gets its own separator.
+        (unless (map-elt state :collapsed)
+          (agent-shell-ui--apply-trailing-whitespace-invisible
+           (map-elt body :start) (map-elt body :end)))))))
 
-(defun agent-shell-ui--set-group-collapsed (group-qualified-id collapsed)
+(cl-defun agent-shell-ui--set-group-collapsed (&key group-qualified-id collapsed include-children)
   "Fold or unfold group GROUP-QUALIFIED-ID (recompute-on-toggle).
 COLLAPSED hides the whole child region regardless of child states;
-expanding reveals it and restores each child's own fold state."
+expanding reveals it and restores each child's own fold state.
+
+When INCLUDE-CHILDREN is non-nil, first set every child to COLLAPSED,
+overriding its own fold state, so expanding opens every child and
+collapsing closes them all.
+
+  ;; Group \"ns-grp\" is collapsed, child \"ns-a\" collapsed and
+  ;; child \"ns-b\" expanded.
+  (agent-shell-ui--set-group-collapsed
+   :group-qualified-id \"ns-grp\" :collapsed nil :include-children t)
+  ;; The group and both children are now expanded."
+  (when include-children
+    (save-mark-and-excursion
+      (dolist (child (agent-shell-ui--group-children
+                      :group-qualified-id group-qualified-id))
+        (unless (eq (and (map-elt (get-text-property (map-elt child :start)
+                                                     'agent-shell-ui-state)
+                                  :collapsed)
+                         t)
+                    (and collapsed t))
+          (goto-char (map-elt child :start))
+          (agent-shell-ui--toggle-leaf-fragment-at-point)))))
   (when-let* ((header (agent-shell-ui--group-header-range group-qualified-id))
               (region (agent-shell-ui--group-child-region
                        :group-qualified-id group-qualified-id))
@@ -1119,10 +1161,10 @@ indents a child's header line under its group header."
                :hint "toggle"))
       (setq label-left-end (point))
       (add-text-properties label-left-start label-left-end
-                           `(agent-shell-ui-section label-left
-                                                    help-echo ,(agent-shell-ui--fragment-help-echo qualified-id)
-                                                    read-only t
-                                                    front-sticky (read-only)))
+                           (append (list 'agent-shell-ui-section 'label-left
+                                         'read-only t
+                                         'front-sticky '(read-only))
+                                   (agent-shell-ui--fragment-help-echo-properties qualified-id)))
       (setq need-space t))
 
     (when label-right
@@ -1134,10 +1176,10 @@ indents a child's header line under its group header."
                :hint "toggle"))
       (setq label-right-end (point))
       (add-text-properties label-right-start label-right-end
-                           `(agent-shell-ui-section label-right
-                                                    help-echo ,(agent-shell-ui--fragment-help-echo qualified-id)
-                                                    read-only t
-                                                    front-sticky (read-only))))
+                           (append (list 'agent-shell-ui-section 'label-right
+                                         'read-only t
+                                         'front-sticky '(read-only))
+                                   (agent-shell-ui--fragment-help-echo-properties qualified-id))))
 
     (when body
       (when (or label-left label-right)
@@ -1154,10 +1196,10 @@ indents a child's header line under its group header."
         (insert (agent-shell-ui--indent-text clean-body body-indent)))
       (setq body-end (point))
       (add-text-properties body-start body-end
-                           `(agent-shell-ui-section body
-                                                    help-echo ,(agent-shell-ui--fragment-help-echo qualified-id)
-                                                    read-only t
-                                                    front-sticky (read-only))))
+                           (append (list 'agent-shell-ui-section 'body
+                                         'read-only t
+                                         'front-sticky '(read-only))
+                                   (agent-shell-ui--fragment-help-echo-properties qualified-id))))
     ;; Indent a group child's header line under its group header.  The
     ;; body already carries its own (deeper) `line-prefix' from above.
     ;; A child with neither label has no header line to indent (the
@@ -1221,13 +1263,14 @@ before that position instead of at the end of the buffer."
            (props `(agent-shell-ui-state ((:qualified-id . ,qualified-id))
                                          read-only t
                                          front-sticky (read-only)))
-           (match (save-mark-and-excursion
-                    (goto-char (point-max))
-                    (text-property-search-backward
-                     'agent-shell-ui-state nil
-                     (lambda (_ state)
-                       (equal (map-elt state :qualified-id) qualified-id))
-                     t))))
+           (match (unless create-new
+                    (save-mark-and-excursion
+                      (goto-char (point-max))
+                      (text-property-search-backward
+                       'agent-shell-ui-state nil
+                       (lambda (_ state)
+                         (equal (map-elt state :qualified-id) qualified-id))
+                       t)))))
       (when text
         (cond
          ;; Append to existing entry.
@@ -1300,8 +1343,8 @@ state-property range first.  User-facing toggling goes through
               (inhibit-read-only t)
               (buffer-undo-list t))
         (agent-shell-ui--set-group-collapsed
-         (map-elt state :qualified-id)
-         (not (map-elt state :collapsed)))
+         :group-qualified-id (map-elt state :qualified-id)
+         :collapsed (not (map-elt state :collapsed)))
       (agent-shell-ui--toggle-leaf-fragment-at-point))))
 
 (defun agent-shell-ui--toggle-leaf-fragment-at-point ()
@@ -1353,6 +1396,13 @@ state-property range first.  User-facing toggling goes through
           (agent-shell-invariants-on-collapse-toggle
            (car split) (cdr split) new-collapsed-state))
         (unless new-collapsed-state
+          ;; Expanding unhid the body's trailing newlines too.  Left
+          ;; visible, a group child added below counts them as its
+          ;; separator (see `agent-shell-ui--required-newlines') and
+          ;; inserts none, so collapsing again pulls that child onto
+          ;; this header line.
+          (agent-shell-ui--apply-trailing-whitespace-invisible
+           (map-elt body :start) (map-elt body :end))
           (save-restriction
             (narrow-to-region (map-elt body :start) (map-elt body :end))
             (run-hooks 'agent-shell-ui-post-expand-fragment-at-point-hook)))))))
@@ -1368,6 +1418,27 @@ state-property range first.  User-facing toggling goes through
                (equal (map-elt state :qualified-id) qualified-id))
              t)
         (agent-shell-ui--toggle-fragment-at-point)))))
+
+(defun agent-shell-ui--collapse-expanded-fragment (qualified-id)
+  "Collapse QUALIFIED-ID's fragment when it is currently expanded.
+
+Unlike `agent-shell-ui-collapse-fragment-by-id', which toggles whatever
+state it finds, this is a no-op when the fragment is already collapsed
+or no longer rendered.
+
+  ;; Fragment \"ns-1\" is expanded.
+  (agent-shell-ui--collapse-expanded-fragment \"ns-1\")
+  ;; Its body is hidden and its indicator reads `▶'."
+  (save-mark-and-excursion
+    (goto-char (point-max))
+    (when-let* (((text-property-search-backward
+                  'agent-shell-ui-state qualified-id
+                  (lambda (_ state)
+                    (equal (map-elt state :qualified-id) qualified-id))
+                  t))
+                ((not (map-elt (get-text-property (point) 'agent-shell-ui-state)
+                               :collapsed))))
+      (agent-shell-ui--toggle-fragment-at-point))))
 
 (cl-defun agent-shell-ui-set-group-collapsed-by-id (&key namespace-id block-id collapsed no-undo)
   "Fold or unfold the group header NAMESPACE-ID/BLOCK-ID to match COLLAPSED.
@@ -1392,7 +1463,8 @@ disable undo recording for this operation.
                   ((eq (map-elt state :kind) 'group))
                   ((not (eq (and (map-elt state :collapsed) t)
                             (and collapsed t)))))
-        (agent-shell-ui--set-group-collapsed qualified-id (and collapsed t))))))
+        (agent-shell-ui--set-group-collapsed
+         :group-qualified-id qualified-id :collapsed (and collapsed t))))))
 
 (defvar-local agent-shell-ui--fold-toggle-state nil
   "Current global fold state for the buffer.
@@ -1425,29 +1497,52 @@ block range contains point, then forward as a fallback."
                                 t)))
               (prop-match-beginning match)))))))
 
-(defun agent-shell-ui-toggle-fragment ()
+(defun agent-shell-ui-toggle-fragment (&optional recursive)
   "Toggle fragment fold at or near point.
 
 If point is on a fragment, toggle that fragment.  If point is inside a
 fragment's block range, toggle the enclosing fragment.  Otherwise jump
 to the next fragment forward and toggle it.
 
+With prefix argument RECURSIVE, toggle the fragment's group instead (the
+group itself when point is on its header) and set every child to the
+group's new state, so expanding opens them all and collapsing closes
+them all.  A fragment outside any group toggles as usual.
+
 After toggling, point returns to its starting position, except when the
 action collapsed the fragment from inside the body — that position is
 now invisible, so point moves to the start of the title line instead.
 Silent no-op when no fragment exists at or after point."
-  (interactive)
+  (interactive "P")
   (when-let* ((origin (point))
               (target (agent-shell-ui--enclosing-fragment-position)))
-    (let* ((target-id (map-elt (get-text-property target 'agent-shell-ui-state)
-                               :qualified-id))
-           (origin-id (map-elt (get-text-property origin 'agent-shell-ui-state)
-                               :qualified-id))
-           (origin-was-inside (and origin-id (equal origin-id target-id))))
-      (goto-char target)
-      (agent-shell-ui--toggle-fragment-at-point)
-      (when origin-was-inside
-        (when-let* ((block (agent-shell-ui--block-range :position target)))
+    (if-let* ((recursive)
+              (state (get-text-property target 'agent-shell-ui-state))
+              (group-id (if (eq (map-elt state :kind) 'group)
+                            (map-elt state :qualified-id)
+                          (map-elt state :group-id)))
+              (header (agent-shell-ui--group-header-range group-id)))
+        (let ((inhibit-read-only t)
+              (buffer-undo-list t))
+          (agent-shell-ui--set-group-collapsed
+           :group-qualified-id group-id
+           :collapsed (not (map-elt (get-text-property (map-elt header :start)
+                                                       'agent-shell-ui-state)
+                                    :collapsed))
+           :include-children t)
+          ;; Collapsing may hide the prior position, so land on the
+          ;; group's header instead.
+          (goto-char (if (get-text-property origin 'invisible)
+                         (map-elt header :start)
+                       origin)))
+      (let ((target-id (map-elt (get-text-property target 'agent-shell-ui-state)
+                                :qualified-id))
+            (origin-id (map-elt (get-text-property origin 'agent-shell-ui-state)
+                                :qualified-id)))
+        (goto-char target)
+        (agent-shell-ui--toggle-fragment-at-point)
+        (when-let* (((and origin-id (equal origin-id target-id)))
+                    (block (agent-shell-ui--block-range :position target)))
           (if (get-text-property origin 'invisible)
               ;; The prior position is now invisible — land at the start
               ;; of the title line instead.
@@ -1666,37 +1761,111 @@ default bindings."
                        'rear-nonsticky t))))
 
 (defvar-local agent-shell-ui--isearch-opened-fragments nil
-  "List of fragment qualified-ids that were opened during isearch.")
+  "Qualified-ids of the fragments the ongoing search expanded.
+
+Most recent first, groups included, for example:
+
+  (\"ns-t2\" \"ns-grp\")
+
+A child is pushed after the group it sits in, so collapsing in order
+folds the child back before its group.
+`agent-shell-ui--isearch-cleanup' does that when the search ends, so
+searching leaves folds as it found them.")
 
 (defun agent-shell-ui--isearch-filter-predicate (beg end)
-  "Custom isearch filter that expands collapsed fragments when matches are found.
-BEG and END define the match region."
-  ;; Check if the match contains invisible text
-  (let ((pos beg)
-        (found-invisible nil))
-    (while (and (< pos end) (not found-invisible))
-      (when (get-text-property pos 'invisible)
-        (setq found-invisible t))
-      (setq pos (1+ pos)))
+  "Return non-nil when isearch should accept the match between BEG and END.
 
-    ;; If we found invisible text, expand the fragment
-    (when found-invisible
-      (save-excursion
-        (goto-char beg)
-        (when-let* ((state (get-text-property (point) 'agent-shell-ui-state))
-                    (qualified-id (map-elt state :qualified-id))
+Honors `search-invisible', which `agent-shell-ui-mode' previously
+overrode:
+
+  nil            skip matches hidden inside collapsed fragments
+  `open'         accept them, expanding the fragment on the way
+  t              accept them, leaving the fragment collapsed
+
+Lazy highlighting and match counting bind `search-invisible' to t or
+`can-be-opened', never `open', so they count hidden matches without
+unfolding anything.
+
+Collapsed bodies hide text with the `invisible' text property, which
+isearch can only skip, never open \(it opens overlays only), so this
+stands in for `isearch-filter-visible'."
+  (save-match-data
+    (cond
+     ((not search-invisible)
+      (isearch-filter-visible beg end))
+     ((eq search-invisible 'open)
+      (agent-shell-ui--isearch-expand-fragment beg end)
+      t)
+     (t t))))
+
+(defun agent-shell-ui--isearch-track-opened (qualified-id)
+  "Record QUALIFIED-ID as expanded by the ongoing search."
+  (unless (member qualified-id agent-shell-ui--isearch-opened-fragments)
+    (push qualified-id agent-shell-ui--isearch-opened-fragments)))
+
+(defun agent-shell-ui--isearch-expand-group (group-qualified-id)
+  "Expand group GROUP-QUALIFIED-ID when it is currently collapsed.
+
+Expanding a child on its own would clear the `invisible' property the
+group laid over it, leaving the body on display under a header still
+reading `▶', with the child's own label line still hidden.  Nil
+GROUP-QUALIFIED-ID (an ungrouped fragment) is a no-op."
+  ;; `--set-group-collapsed' leaves point on the header indicator it
+  ;; rewrites, which would send the caller's toggle to the group.
+  (save-mark-and-excursion
+    (when-let* ((group-qualified-id)
+                (header (agent-shell-ui--group-header-range group-qualified-id))
+                (state (get-text-property (map-elt header :start)
+                                          'agent-shell-ui-state))
+                ((map-elt state :collapsed))
+                (inhibit-read-only t)
+                (buffer-undo-list t))
+      (agent-shell-ui--isearch-track-opened group-qualified-id)
+      (agent-shell-ui--set-group-collapsed
+       :group-qualified-id group-qualified-id :collapsed nil))))
+
+(defun agent-shell-ui--isearch-expand-fragment (beg end)
+  "Expand the collapsed fragment hiding the isearch match between BEG and END.
+Expands the owning group first, so the match arrives in view under its
+own label rather than orphaned below a collapsed header.  Does nothing
+when the match is fully visible."
+  (when (text-property-not-all beg end 'invisible nil)
+    (save-excursion
+      (goto-char beg)
+      (when-let* ((state (get-text-property (point) 'agent-shell-ui-state)))
+        (agent-shell-ui--isearch-expand-group (map-elt state :group-id))
+        (when-let* ((qualified-id (map-elt state :qualified-id))
                     ((map-elt state :collapsed)))
-          ;; Track which fragments we've opened
-          (unless (member qualified-id agent-shell-ui--isearch-opened-fragments)
-            (push qualified-id agent-shell-ui--isearch-opened-fragments))
-          ;; Expand the fragment
-          (agent-shell-ui--toggle-fragment-at-point))))
+          (agent-shell-ui--isearch-track-opened qualified-id)
+          (agent-shell-ui--toggle-fragment-at-point))))))
 
-    ;; Always return t to include the match
-    t))
+(defun agent-shell-ui--isearch-fragments-at-point ()
+  "Return qualified-ids of the fragment point sits in and its owning group.
+
+Also looks at the char before point, so a match ending on a fragment's
+last char still counts as landing in that fragment.  For example:
+
+  (\"ns-t2\" \"ns-grp\")"
+  (when-let* ((state (or (get-text-property (point) 'agent-shell-ui-state)
+                         (unless (bobp)
+                           (get-text-property (1- (point))
+                                              'agent-shell-ui-state)))))
+    (seq-remove #'null (list (map-elt state :qualified-id)
+                             (map-elt state :group-id)))))
 
 (defun agent-shell-ui--isearch-cleanup ()
-  "Clean up isearch state when search ends."
+  "Collapse the fragments the search expanded, minus where point landed.
+
+Runs from `isearch-mode-end-hook'.  Only fragments isearch itself
+expanded are collapsed again, so anything unfolded by hand during the
+search stays open.  The fragment point landed on is kept, as is its
+group, which would otherwise fold the match back out of sight.  Quitting
+with \\[isearch-abort] restores point before this runs, so in that case
+every fragment isearch opened folds back."
+  (let ((landed-on (agent-shell-ui--isearch-fragments-at-point)))
+    (dolist (qualified-id agent-shell-ui--isearch-opened-fragments)
+      (unless (member qualified-id landed-on)
+        (agent-shell-ui--collapse-expanded-fragment qualified-id))))
   (setq agent-shell-ui--isearch-opened-fragments nil))
 
 (defvar agent-shell-ui-mode-map
@@ -1712,14 +1881,13 @@ BEG and END define the match region."
   (if agent-shell-ui-mode
       (progn
         (cursor-sensor-mode 1)
-        ;; Enable searching in invisible text and auto-expansion
-        (setq-local search-invisible 'open-all)
-        ;; Use custom filter predicate to expand fragments during search
+        ;; Collapsed bodies use the `invisible' text property, which
+        ;; isearch can't open on its own.  The predicate honors
+        ;; `search-invisible' and expands fragments as matches are
+        ;; visited, while the end hook folds them back.
         (setq-local isearch-filter-predicate #'agent-shell-ui--isearch-filter-predicate)
-        ;; Clean up when search ends
         (add-hook 'isearch-mode-end-hook #'agent-shell-ui--isearch-cleanup nil 'local))
     (cursor-sensor-mode -1)
-    (kill-local-variable 'search-invisible)
     (kill-local-variable 'isearch-filter-predicate)
     (remove-hook 'isearch-mode-end-hook #'agent-shell-ui--isearch-cleanup 'local)))
 
