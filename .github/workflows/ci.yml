@@ -140,9 +140,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # xenodium's acp.el, not the acp.el-plus fork. agent-shell refuses to
+      # run against acp.el older than 0.17.1 and says so; the fork is 0.11.3
+      # and lacks :cursor on session-list, :meta on session-fork/resume,
+      # :elicitation-form-capability, and acp-make-session-set-config-option-request
+      # entirely. The fork's one functional commit asserts a Terminal and
+      # Meta capability this repo never references.
       - uses: actions/checkout@v4
         with:
-          repository: timvisher-dd/acp.el-plus
+          repository: xenodium/acp.el
           path: deps/acp.el
 
       - uses: actions/checkout@v4
