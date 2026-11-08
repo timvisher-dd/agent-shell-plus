@@ -3154,6 +3154,87 @@ after" nil)))))
   (should (equal (agent-shell-markdown--table-wrap-text "日本のfoo語" 3)
                  '("日" "本" "の" "foo" "語"))))
 
+(ert-deftest agent-shell-markdown-table-wrap-text-breaks-after-height-scaled-cjk ()
+  ;; Graphic frames put `display' (height N) on CJK chars to even out
+  ;; row heights.  Only an image's `display' blocks a break, so these
+  ;; chars stay break points.
+  (should (equal (mapcar #'substring-no-properties
+                         (agent-shell-markdown--table-wrap-text
+                          (concat "a "
+                                  (propertize "日本語" 'display '(height 0.9)))
+                          5))
+                 '("a 日" "本語"))))
+
+(defun agent-shell-markdown-tests--image-text (text)
+  "Return TEXT with a `display' image over all of it.
+As a render function shows an equation: the source stays in the
+buffer and one image is displayed in its place."
+  (propertize text 'display '(image :type svg :data "<svg/>")))
+
+(ert-deftest agent-shell-markdown-table-wrap-text-keeps-image-whole ()
+  ;; Text under one `display' image is one word: a break at a space
+  ;; inside it would show the image once on each line.
+  (let* ((image (agent-shell-markdown-tests--image-text "\\( x + y \\)"))
+         (lines (agent-shell-markdown--table-wrap-text
+                 (concat "a " image " b") 5)))
+    (should (equal lines '("a" "\\( x + y \\)" "b")))
+    (should (equal-including-properties (nth 1 lines) image))))
+
+(ert-deftest agent-shell-markdown-table-pixel-path-p-includes-images ()
+  ;; An image over plain ASCII alt text must be padded in pixels too,
+  ;; or the cell is padded as if it were its alt text.
+  (should-not (agent-shell-markdown--table-pixel-path-p "foo"))
+  (should (agent-shell-markdown--table-pixel-path-p "日本"))
+  (should (agent-shell-markdown--table-pixel-path-p
+           (propertize "foo" 'face 'bold)))
+  (should (agent-shell-markdown--table-pixel-path-p
+           (agent-shell-markdown-tests--image-text "foo"))))
+
+(ert-deftest agent-shell-markdown-table-fit-images-caps-markdown-images ()
+  ;; A markdown image is shrunk to one line and stops tracking the
+  ;; window width, so `rerender-images' can't undo the cap.
+  (skip-unless (image-type-available-p 'svg))
+  (let ((file (make-temp-file "agent-shell-table-image" nil ".svg"
+                              "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"600\" height=\"600\"/>")))
+    (unwind-protect
+        (let* ((text (propertize "icon"
+                                 'display (create-image file nil nil :max-width 500)
+                                 'agent-shell-markdown-image-width-ratio 'default
+                                 'agent-shell-markdown-image-window-width 1000))
+               (fitted (agent-shell-markdown--table-fit-images :text text)))
+          (should (= (image-property (get-text-property 0 'display fitted)
+                                     :max-height)
+                     (frame-char-height)))
+          (should (eq (image-property (get-text-property 0 'display fitted)
+                                      :ascent)
+                      'center))
+          (should (= (image-property (get-text-property 0 'display fitted)
+                                     :max-width)
+                     500))
+          (should-not (get-text-property
+                       0 'agent-shell-markdown-image-width-ratio fitted))
+          (should-not (get-text-property
+                       0 'agent-shell-markdown-image-window-width fitted))
+          (should (get-text-property
+                   0 'agent-shell-markdown-image-width-ratio text)))
+      (delete-file file))))
+
+(ert-deftest agent-shell-markdown-table-fit-images-leaves-other-images ()
+  ;; Images a render function drew (e.g. equations) aren't ours to size.
+  (let ((text (agent-shell-markdown-tests--image-text "\\( x \\)")))
+    (should (equal-including-properties
+             (agent-shell-markdown--table-fit-images :text text)
+             text))))
+
+(ert-deftest agent-shell-markdown-table-longest-word-counts-image-whole ()
+  ;; A column is at least as wide as an image in it.  Without a
+  ;; graphical window, the image counts as the text it covers.
+  (should (= 11 (agent-shell-markdown--table-longest-word
+                 :str (concat "a "
+                              (agent-shell-markdown-tests--image-text
+                               "\\( x + y \\)")
+                              " b")))))
+
 (ert-deftest agent-shell-markdown-mirrors-face-to-font-lock-face ()
   ;; Faces are mirrored to `font-lock-face' so our styling survives
   ;; `font-lock-mode' re-fontification in comint / shell-maker buffers.
@@ -3260,6 +3341,100 @@ after" nil)))))
         (setq calls 0)
         (agent-shell-markdown-rerender-tables)
         (should (= calls 0))))))
+
+(ert-deftest agent-shell-markdown-rerender-table-from-source ()
+  ;; With SOURCE, the table at POS is laid out from it, SOURCE becomes
+  ;; its stored source, and the text around the table is left alone.
+  (with-temp-buffer
+    (insert "before\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nafter\n")
+    (agent-shell-markdown-replace-markup)
+    (goto-char (point-min))
+    (search-forward "1")
+    (let* ((pos (match-beginning 0))
+           (stored (get-text-property pos 'agent-shell-markdown-table-source))
+           (source (replace-regexp-in-string "| 1 |" "| 123 |" stored t t)))
+      (should (eq (agent-shell-markdown-rerender-table
+                   :position pos :source source) source))
+      (goto-char (point-min))
+      (search-forward "123")
+      (should (eq (get-text-property (match-beginning 0)
+                                     'agent-shell-markdown-table-source)
+                  source))
+      (should (string-prefix-p "before\n\n" (buffer-string)))
+      (should (string-suffix-p "\n\nafter\n" (buffer-string))))))
+
+(ert-deftest agent-shell-markdown-rerender-table-from-stored-source ()
+  ;; Without SOURCE, the table is laid out again from its stored source,
+  ;; which is returned.
+  (with-temp-buffer
+    (insert "| A | B |\n|---|---|\n| 1 | 2 |\n")
+    (agent-shell-markdown-replace-markup)
+    (let ((rendered (buffer-string))
+          (stored (get-text-property (point-min)
+                                     'agent-shell-markdown-table-source)))
+      (should (equal (agent-shell-markdown-rerender-table
+                      :position (point-min))
+                     stored))
+      (should (equal (buffer-string) rendered)))))
+
+(ert-deftest agent-shell-markdown-rerender-table-outside-a-table ()
+  ;; POS outside a laid-out table: nil, and the buffer is not touched.
+  (with-temp-buffer
+    (insert "text\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")
+    (agent-shell-markdown-replace-markup)
+    (let ((rendered (buffer-string)))
+      (should-not (agent-shell-markdown-rerender-table
+                   :position (point-min)))
+      (should (equal (buffer-string) rendered)))))
+
+(ert-deftest agent-shell-markdown-table-at-returns-source-and-bounds ()
+  ;; Any position in a rendered table yields the same source and bounds,
+  ;; which span exactly the table's rendered text.
+  (with-temp-buffer
+    (insert "before\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\nafter\n")
+    (agent-shell-markdown-replace-markup)
+    (goto-char (point-min))
+    (search-forward "A")
+    (let ((table (agent-shell-markdown-table-at (match-beginning 0))))
+      (should (eq (map-elt table :source)
+                  (get-text-property (match-beginning 0)
+                                     'agent-shell-markdown-table-source)))
+      (should (equal (buffer-substring (point-min) (map-elt table :start))
+                     "before\n\n"))
+      (should (string-prefix-p "\n\nafter"
+                               (buffer-substring (map-elt table :end)
+                                                 (point-max))))
+      (should (equal (agent-shell-markdown-table-at (map-elt table :start))
+                     table))
+      (should (equal (agent-shell-markdown-table-at (1- (map-elt table :end)))
+                     table)))))
+
+(ert-deftest agent-shell-markdown-table-at-outside-a-table ()
+  (with-temp-buffer
+    (insert "text\n\n| A | B |\n|---|---|\n| 1 | 2 |\n")
+    (agent-shell-markdown-replace-markup)
+    (should-not (agent-shell-markdown-table-at (point-min)))))
+
+(ert-deftest agent-shell-markdown-rerender-table-in-read-only-text ()
+  ;; A shell buffer's output is read-only.  The re-layout is not an
+  ;; edit: it goes through, stays off the undo list and leaves the
+  ;; buffer unmodified.
+  (with-temp-buffer
+    (insert "| A | B |\n|---|---|\n| 1 | 2 |\n")
+    (agent-shell-markdown-replace-markup)
+    (put-text-property (point-min) (point-max) 'read-only t)
+    (set-buffer-modified-p nil)
+    (setq buffer-undo-list nil)
+    (let ((source (replace-regexp-in-string
+                   "| 1 |" "| 123 |"
+                   (get-text-property (point-min)
+                                      'agent-shell-markdown-table-source)
+                   t t)))
+      (agent-shell-markdown-rerender-table
+       :position (point-min) :source source)
+      (should (string-match-p "123" (buffer-string)))
+      (should-not (buffer-modified-p))
+      (should-not buffer-undo-list))))
 
 (ert-deftest agent-shell-markdown-carry-properties-drops-font-lock-face ()
   ;; `font-lock-face' is our own styling (mirrored from `face'), not a

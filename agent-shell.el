@@ -4,10 +4,10 @@
 
 ;; Author: Alvaro Ramirez https://xenodium.com
 ;; URL: https://github.com/xenodium/agent-shell
-;; Version: 0.93.2
+;; Version: 0.93.3
 ;; Package-Requires: ((emacs "29.1") (shell-maker "0.98.2") (acp "0.17.1"))
 
-(defconst agent-shell--version "0.93.2")
+(defconst agent-shell--version "0.93.3")
 
 ;; Minimum dependency versions, as declared in the `Package-Requires'
 ;; header above.  Package managers that resolve versions enforce the
@@ -6112,8 +6112,8 @@ insert the character instead."
     ;; when there's a prefix: its own cells and the links in them are
     ;; behind the search from there, so it lands past the table.
     (when-let* ((leave-table)
-                (table (agent-shell-markdown-table--region-at-point)))
-      (goto-char (cdr table)))
+                (table (agent-shell-markdown-table-at (point))))
+      (goto-char (map-elt table :end)))
     (let* ((current-pos (point))
            (prompt-pos (save-mark-and-excursion
                          (when (comint-next-prompt 1)
@@ -6182,8 +6182,8 @@ insert the character instead."
     ;; when there's a prefix, as `agent-shell-next-item' does from its
     ;; end.
     (when-let* ((leave-table)
-                (table (agent-shell-markdown-table--region-at-point)))
-      (goto-char (car table)))
+                (table (agent-shell-markdown-table-at (point))))
+      (goto-char (map-elt table :start)))
     (let* ((current-pos (point))
            (prompt-pos (save-mark-and-excursion
                          (when (comint-next-prompt (- 1))
