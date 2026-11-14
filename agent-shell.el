@@ -4,10 +4,10 @@
 
 ;; Author: Alvaro Ramirez https://xenodium.com
 ;; URL: https://github.com/xenodium/agent-shell
-;; Version: 0.93.3
+;; Version: 0.96.1
 ;; Package-Requires: ((emacs "29.1") (shell-maker "0.98.2") (acp "0.17.1"))
 
-(defconst agent-shell--version "0.93.3")
+(defconst agent-shell--version "0.96.1")
 
 ;; Minimum dependency versions, as declared in the `Package-Requires'
 ;; header above.  Package managers that resolve versions enforce the
@@ -321,7 +321,7 @@ are applied.  Each function is called with a range alist containing:
   :group 'agent-shell)
 
 (defvar agent-shell--stream-render-interval 0.05
-  "Seconds to coalesce streamed message chunks before rendering them.
+  "Seconds to coalesce streamed message and thought chunks before rendering.
 
 Batching avoids re-rendering a growing markdown body on every chunk.
 Other fragment or plain text updates flush pending chunks first,
@@ -436,10 +436,12 @@ bullet, while a body of prose is untouched."
                     (save-excursion
                       (goto-char (point-max))
                       (beginning-of-line)
-                      (and (looking-at-p
+                      (and (looking-at
                             agent-shell-markdown--list-item-last-line-regexp)
                            (not (get-text-property
-                                 (point) 'agent-shell-markdown-list-rendered))))
+                                 (point) 'agent-shell-markdown-list-rendered))
+                           (not (agent-shell-markdown--rendered-list-marker-p
+                                 (match-beginning 2) (match-end 2)))))
                     ;; A blockquote line or header whose newline never
                     ;; arrived.  A rendered header has lost its `#'s.
                     (save-excursion
@@ -991,6 +993,22 @@ context is shown rather than nothing."
                  (const :tag "Last response (last)" last)
                  (const :tag "First prompt + last response (first-last)" first-last)
                  (const :tag "Full replay" full))
+  :group 'agent-shell)
+
+(defcustom agent-shell-session-fork-restore-history nil
+  "Whether to restore history when forking a session.
+
+When non-nil, load the forked session via `session/load' so its
+history is shown as `agent-shell-session-restore-verbosity'
+dictates.  Only applies when that verbosity results in
+`session/load'.
+
+When nil, forking sends `session/fork' alone and the new shell
+starts without history.
+
+Requires agents to support loading a session right after forking
+it (e.g. claude-agent-acp 0.90.0 or newer)."
+  :type 'boolean
   :group 'agent-shell)
 
 (defvar agent-shell-session-restore-strategy nil
@@ -1548,6 +1566,10 @@ With \\[universal-argument] prefix ARG, submit through
 `agent-shell-busy-submit-override-function' instead, which steers by
 default.  \\[agent-shell-submit-override] is bound to the same thing.
 
+With ARG at an empty prompt mid-turn, call
+`agent-shell-busy-submit-reroute-function' instead, which by default
+offers to steer the most recently queued prompt.
+
 This owns the `agent-shell-submit' name because shell-maker's
 per-start aliasing is disabled (see the `:alias-commands nil' call in
 `agent-shell--start')."
@@ -1558,9 +1580,12 @@ per-start aliasing is disabled (see the `:alias-commands nil' call in
               (eq agent-shell-session-strategy 'new-deferred))
     (user-error "Starting agent, please wait"))
   (if (shell-maker-busy)
-      (when-let* ((prompt (agent-shell--prompt-input)))
-        (agent-shell--busy-submit :prompt prompt :override arg)
-        (agent-shell--clear-prompt-input))
+      (if-let* ((prompt (agent-shell--prompt-input)))
+          (progn
+            (agent-shell--busy-submit :prompt prompt :override arg)
+            (agent-shell--clear-prompt-input))
+        (when (and arg agent-shell-busy-submit-reroute-function)
+          (funcall agent-shell-busy-submit-reroute-function)))
     (shell-maker-submit)))
 
 (defun agent-shell-submit-override ()
@@ -1571,7 +1596,11 @@ Submits through `agent-shell-busy-submit-override-function' rather than
 steering is not the default is one keystroke away.
 
 Only differs from \\[agent-shell-submit] while the agent is working:
-with no turn to queue behind or steer into, both simply submit."
+with no turn to queue behind or steer into, both simply submit.
+
+At an empty prompt mid-turn, calls
+`agent-shell-busy-submit-reroute-function' instead, so a prompt queued
+by mistake can still be sent another way (steered by default)."
   (declare (modes agent-shell-mode))
   (interactive)
   (agent-shell-submit '(4)))
@@ -3247,20 +3276,20 @@ lowercase; the assembled summary capitalizes its first word.  See URL
     (:singular . "tool call") (:plural . "tool calls"))
   "Phrasing for kinds absent from `agent-shell--tool-call-kind-phrases'.")
 
-(cl-defun agent-shell--tool-call-kind-phrase (&key kind count pending)
+(cl-defun agent-shell--tool-call-kind-phrase (&key kind count unfinished)
   "Return a lowercase phrase for KIND repeated COUNT times.
-When PENDING is non-nil the present-tense verb is used, so a not-yet-run
-action reads \"run a command\" rather than \"ran a command\".  Callers
-capitalize as needed.
+When UNFINISHED is non-nil the present-tense verb is used, so an
+action still under way reads \"run a command\" rather than \"ran a
+command\".  Callers capitalize as needed.
 
   (agent-shell--tool-call-kind-phrase :kind \"execute\" :count 2)
   ;; => \"ran 2 commands\"
-  (agent-shell--tool-call-kind-phrase :kind \"execute\" :count 1 :pending t)
+  (agent-shell--tool-call-kind-phrase :kind \"execute\" :count 1 :unfinished t)
   ;; => \"run a command\""
   (let ((phrase (or (assoc-default kind agent-shell--tool-call-kind-phrases)
                     agent-shell--tool-call-kind-phrase-default)))
     (format "%s %s %s"
-            (map-elt phrase (if pending :present :past))
+            (map-elt phrase (if unfinished :present :past))
             (if (= count 1) "a" (number-to-string count))
             (map-elt phrase (if (= count 1) :singular :plural)))))
 
@@ -3323,12 +3352,12 @@ Thoughts are not counted."
           (seq-map
            (lambda (kind)
              (let* ((of-kind (seq-filter (lambda (member)
-                                          (equal (funcall member-kind member) kind))
-                                        tool-members))
-                    (pending (seq-some (lambda (member)
-                                         (member (map-elt (cdr member) :status)
-                                                 '("pending" "in_progress")))
-                                       of-kind))
+                                           (equal (funcall member-kind member) kind))
+                                         tool-members))
+                    (unfinished (seq-some (lambda (member)
+                                            (member (map-elt (cdr member) :status)
+                                                    '("pending" "in_progress")))
+                                          of-kind))
                     (paths (when (member kind '("read" "edit" "delete"))
                              (seq-map (lambda (member)
                                         (agent-shell--tool-call-file-paths (cdr member)))
@@ -3338,7 +3367,7 @@ Thoughts are not counted."
                 :count (if (and paths (not (memq nil paths)))
                            (length (seq-uniq (apply #'append paths)))
                          (length of-kind))
-                :pending pending)))
+                :unfinished unfinished)))
            (seq-uniq (seq-map member-kind tool-members))))
          (summary (string-join (if thought (cons "thought" tool-phrases) tool-phrases)
                                ", ")))
@@ -3656,16 +3685,38 @@ killed — handlers downstream assume the buffer is live."
                   :above-last-prompt (not (agent-shell--active-requests-p state)))))
              (map-put! state :last-entry-type "tool_call"))
             ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "agent_thought_chunk")
-             (let ((new-thought-p (not (equal (map-elt state :last-entry-type)
-                                              "agent_thought_chunk")))
-                   (content (agent-shell--content-block-to-markdown
-                             (map-nested-elt acp-notification '(params update content))))
-                   ;; Share the tool-call run counter so a thought lands in
-                   ;; the same activity group as the surrounding tool calls.
-                   ;; Read before `:last-entry-type' is advanced below;
-                   ;; stable across a thought's streamed chunks since
-                   ;; "agent_thought_chunk" keeps the run open.
-                   (group-id (agent-shell--activity-group-current-id state)))
+             (let* ((new-thought-p (not (equal (map-elt state :last-entry-type)
+                                               "agent_thought_chunk")))
+                    (content (agent-shell--content-block-to-markdown
+                              (map-nested-elt acp-notification '(params update content))))
+                    ;; Base face for the body.  The markdown styling rendered on
+                    ;; top layers its own faces ahead of it, so bold, links and
+                    ;; code spans in a thought keep their faces.  Set on both
+                    ;; properties for the reason
+                    ;; `agent-shell-markdown--mirror-face-to-font-lock-face'
+                    ;; gives: fontification clears a plain `face' (it covers a
+                    ;; collapsed body long before the renderer, and its mirror,
+                    ;; ever sees it), while `font-lock-face' only renders while
+                    ;; `font-lock-mode' is on.
+                    (body (agent-shell--add-text-properties
+                           content
+                           'face 'agent-shell-thought-body
+                           'font-lock-face 'agent-shell-thought-body))
+                    ;; Out of turn, key under a dedicated namespace so the
+                    ;; thought forms its own fragment rather than coalescing
+                    ;; into the previous turn's final thought (same request-count
+                    ;; and group-count).  ACP's ContentChunk.messageId is the
+                    ;; spec's intended discriminator here, but it is optional and
+                    ;; only populated by newer agents, so we group by turn
+                    ;; boundary instead.
+                    (namespace-id (unless (agent-shell--active-requests-p state)
+                                    "out-of-turn"))
+                    ;; Share the tool-call run counter so a thought lands in
+                    ;; the same activity group as the surrounding tool calls.
+                    ;; Read before `:last-entry-type' is advanced below;
+                    ;; stable across a thought's streamed chunks since
+                    ;; "agent_thought_chunk" keeps the run open.
+                    (group-id (agent-shell--activity-group-current-id state)))
                (when new-thought-p
                  (map-put! state :chunked-group-count (1+ (map-elt state :chunked-group-count)))
                  (agent-shell--append-transcript
@@ -3674,57 +3725,48 @@ killed — handlers downstream assume the buffer is live."
                (agent-shell--append-transcript
                 :text (agent-shell--indent-markdown-headers content)
                 :file-path agent-shell--transcript-file)
-               (agent-shell--update-fragment
-                :state state
-                ;; Out of turn, key under a dedicated namespace so the
-                ;; thought forms its own fragment rather than coalescing
-                ;; into the previous turn's final thought (same request-count
-                ;; and group-count).  ACP's ContentChunk.messageId is the
-                ;; spec's intended discriminator here, but it is optional and
-                ;; only populated by newer agents, so we group by turn
-                ;; boundary instead.
-                :namespace-id (unless (agent-shell--active-requests-p state) "out-of-turn")
-                :block-id (format "%s-agent_thought_chunk"
-                                  (map-elt state :chunked-group-count))
-                :label-left  (concat
-                              (when-let* ((icon (agent-shell--thought-process-icon)))
-                                (concat icon " "))
-                              (propertize "Thinking" 'font-lock-face 'agent-shell-section-heading))
-                ;; Base face for the body.  The markdown styling rendered on
-                ;; top layers its own faces ahead of it, so bold, links and
-                ;; code spans in a thought keep their faces.  Set on both
-                ;; properties for the reason
-                ;; `agent-shell-markdown--mirror-face-to-font-lock-face'
-                ;; gives: fontification clears a plain `face' (it covers a
-                ;; collapsed body long before the renderer, and its mirror,
-                ;; ever sees it), while `font-lock-face' only renders while
-                ;; `font-lock-mode' is on.
-                :body (agent-shell--add-text-properties
-                       content
-                       'face 'agent-shell-thought-body
-                       'font-lock-face 'agent-shell-thought-body)
-                :append (equal (map-elt state :last-entry-type)
-                               "agent_thought_chunk")
-                :expanded agent-shell-thought-process-expand-by-default
-                :group-id group-id
-                :group-label agent-shell--activity-group-label
-                :group-expanded (agent-shell--activity-group-initial-expanded-p)
-                :render-body-images t
-                :above-last-prompt (not (agent-shell--active-requests-p state)))
-               ;; Count this thought and relabel the header so a thought-only
-               ;; group reads "Thinking"/"Thought" instead of the neutral
-               ;; placeholder, and a mixed group can mention it.  Both run once
-               ;; per thought run, not per streamed chunk: the header label
-               ;; depends only on the thought count (advanced here on
-               ;; `new-thought-p') and the group's tool statuses (unchanged
-               ;; while a pure thought run streams), so relabeling on every
-               ;; chunk repeats an identical update and its buffer scan.
-               (when new-thought-p
-                 (agent-shell--count-group-thought state group-id)
-                 (agent-shell--refresh-activity-group-header state group-id)
-                 (agent-shell--sync-activity-group-fold
-                  :state state :group-id group-id
-                  :namespace-id (unless (agent-shell--active-requests-p state) "out-of-turn"))))
+               ;; Only a thought's first chunk renders synchronously, creating
+               ;; the block with its labels and group.  The rest only append to
+               ;; its body, so they go through the same batching as message
+               ;; chunks rather than re-rendering on every chunk.
+               (if new-thought-p
+                   (progn
+                     (agent-shell--update-fragment
+                      :state state
+                      :namespace-id namespace-id
+                      :block-id (format "%s-agent_thought_chunk"
+                                        (map-elt state :chunked-group-count))
+                      :label-left  (concat
+                                    (when-let* ((icon (agent-shell--thought-process-icon)))
+                                      (concat icon " "))
+                                    (propertize "Thinking" 'font-lock-face 'agent-shell-section-heading))
+                      :body body
+                      :expanded agent-shell-thought-process-expand-by-default
+                      :group-id group-id
+                      :group-label agent-shell--activity-group-label
+                      :group-expanded (agent-shell--activity-group-initial-expanded-p)
+                      :render-body-images t
+                      :above-last-prompt (not (agent-shell--active-requests-p state)))
+                     ;; Count this thought and relabel the header so a
+                     ;; thought-only group reads "Thinking"/"Thought" instead of
+                     ;; the neutral placeholder, and a mixed group can mention
+                     ;; it.  Both run once per thought run, not per streamed
+                     ;; chunk: the header label depends only on the thought
+                     ;; count (advanced here on `new-thought-p') and the group's
+                     ;; tool statuses (unchanged while a pure thought run
+                     ;; streams), so relabeling on every chunk repeats an
+                     ;; identical update and its buffer scan.
+                     (agent-shell--count-group-thought state group-id)
+                     (agent-shell--refresh-activity-group-header state group-id)
+                     (agent-shell--sync-activity-group-fold
+                      :state state :group-id group-id :namespace-id namespace-id))
+                 (agent-shell--update-streamed-fragment
+                  :state state
+                  :namespace-id namespace-id
+                  :block-id (format "%s-agent_thought_chunk"
+                                    (map-elt state :chunked-group-count))
+                  :body body
+                  :above-last-prompt (not (agent-shell--active-requests-p state)))))
              (map-put! state :last-entry-type "agent_thought_chunk"))
             ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "user_message_chunk")
              ;; A user_message_chunk replays a user submission.  Render it
@@ -4786,6 +4828,33 @@ DIFFS is a list of diff infos as returned by
               (map-merge 'alist old-tool-call tool-call-overrides)
             tool-call-overrides))
     (map-put! state :tool-calls updated-tools)))
+
+(cl-defun agent-shell--unfinished-tool-calls (&key tool-calls)
+  "Return TOOL-CALLS whose activity group still has an unfinished member.
+
+A turn can end with tool calls still running (subagents carry on past
+it), and their tool_call_update notifications arrive out of turn.  Keep
+those calls, so an update still finds the title and kind it was rendered
+with, along with their group siblings, so the group header still counts
+every member.  Everything else is no longer needed.
+
+  (agent-shell--unfinished-tool-calls
+   :tool-calls \\='((\"t1\" . ((:group-id . \"g1\") (:status . \"completed\")))
+                 (\"t2\" . ((:group-id . \"g2\") (:status . \"completed\")))
+                 (\"t3\" . ((:group-id . \"g2\") (:status . \"pending\")))))
+  ;; => ((\"t2\" . ((:group-id . \"g2\") (:status . \"completed\")))
+  ;;     (\"t3\" . ((:group-id . \"g2\") (:status . \"pending\"))))"
+  (let ((unfinished (seq-filter (lambda (pair)
+                                  (member (map-elt (cdr pair) :status)
+                                          '("pending" "in_progress")))
+                                tool-calls)))
+    (seq-filter (lambda (pair)
+                  (or (memq pair unfinished)
+                      (when-let* ((group-id (map-elt (cdr pair) :group-id)))
+                        (seq-find (lambda (other)
+                                    (equal (map-elt (cdr other) :group-id) group-id))
+                                  unfinished))))
+                tool-calls)))
 
 (cl-defun agent-shell--make-boxed-message (&key text width)
   "Return TEXT framed in a rounded Unicode box.
@@ -6085,9 +6154,10 @@ which mid-turn is past whatever the user is typing."
   "Go to next item.
 
 Could be a prompt, an expandable item, a displayed image, a rendered
-link, a source block, or a rendered markdown table.  A table is entered
-at its first cell, then walked one cell (and one link inside a cell) at
-a time, moving on to the item after it once past its last one.
+link, a source block, a blockquote, or a rendered markdown table.  A
+table is entered at its first cell, then walked one cell (and one link
+inside a cell) at a time, moving on to the item after it once past its
+last one.
 
 With prefix LEAVE-TABLE, carry on from the end of the table point is
 in, landing on the item after it rather than on its next cell.  A wide
@@ -6130,6 +6200,8 @@ insert the character instead."
                        (agent-shell-markdown--next-visible-link)))
            (source-block-pos (save-mark-and-excursion
                                (agent-shell-markdown--next-visible-source-block)))
+           (blockquote-pos (save-mark-and-excursion
+                            (agent-shell-markdown--next-visible-blockquote)))
            (table-pos (save-mark-and-excursion
                         (agent-shell-markdown--search-visible
                          :property 'agent-shell-markdown-table-cell-start)))
@@ -6145,6 +6217,7 @@ insert the character instead."
                                                            image-pos
                                                            link-pos
                                                            source-block-pos
+                                                           blockquote-pos
                                                            table-pos)))))
            (next-pos (when positions
                        (seq-min positions))))
@@ -6158,9 +6231,9 @@ insert the character instead."
   "Go to previous item.
 
 Could be a prompt, an expandable item, a displayed image, a rendered
-link, a source block, or a rendered markdown table.  A table above is
-entered at its first cell, so navigating again from there leaves it for
-the item above it.
+link, a source block, a blockquote, or a rendered markdown table.  A
+table above is entered at its first cell, so navigating again from
+there leaves it for the item above it.
 
 With prefix LEAVE-TABLE, carry on from the start of the table point is
 in, as `agent-shell-next-item' does from its end.
@@ -6201,6 +6274,8 @@ insert the character instead."
            (source-block-pos
             (save-mark-and-excursion
               (agent-shell-markdown--previous-visible-source-block)))
+           (blockquote-pos (save-mark-and-excursion
+                            (agent-shell-markdown--previous-visible-blockquote)))
            (table-pos (save-mark-and-excursion
                         (agent-shell-markdown--search-visible
                          :property 'agent-shell-markdown-table-cell-start
@@ -6217,6 +6292,7 @@ insert the character instead."
                                                            image-pos
                                                            link-pos
                                                            source-block-pos
+                                                           blockquote-pos
                                                            table-pos)))))
            (next-pos (when positions
                        (seq-max positions))))
@@ -6245,22 +6321,33 @@ composing a prompt."
 With `:INHERIT-ENV' t, also inherit system environment (as per `setenv')
 With `:LOAD-ENV' PATH-OR-PATHS, load .env files from given path(s).
 
+A value may also be a function taking no arguments.  It is called when
+the agent starts rather than now, which suits secrets that aren't
+available yet (for example, a password store still locked at init).
+Such a value is kept as a (NAME . FUNCTION) element until
+`agent-shell--resolve-environment-variables' calls it.
+
 For example:
 
   (agent-shell-make-environment-variables
     \"PATH\" \"/usr/bin\"
     \"HOME\" \"/home/user\"
+    \"SECRET\" (lambda ()
+                 (auth-source-pick-first-password :host \"example.org\"))
     :load-env \"~/.env\")
 
 Returns:
 
    (\"PATH=/usr/bin\"
-    \"HOME=/home/user\")."
+    \"HOME=/home/user\"
+    (\"SECRET\" . (lambda () ...)))."
   (unless (zerop (mod (length vars) 2))
     (error "`agent-shell-make-environment' must receive complete pairs"))
   (append (mapcan (lambda (pair)
                     (unless (keywordp (car pair))
-                      (list (format "%s=%s" (car pair) (cadr pair)))))
+                      (list (if (functionp (cadr pair))
+                                (cons (car pair) (cadr pair))
+                              (format "%s=%s" (car pair) (cadr pair))))))
                   (seq-partition vars 2))
           (when load-env
             (let ((paths (if (listp load-env) load-env (list load-env))))
@@ -6280,6 +6367,36 @@ Returns:
                       paths)))
           (when inherit-env
             process-environment)))
+
+(cl-defun agent-shell--resolve-environment-variables (&key environment-variables on-failure)
+  "Return ENVIRONMENT-VARIABLES with deferred values resolved.
+
+Strings are kept as is.  Each (NAME . FUNCTION) element, as made by
+`agent-shell-make-environment-variables', becomes \"NAME=VALUE\" with
+VALUE from calling FUNCTION.  An element whose FUNCTION signals or
+returns nil is omitted, and ON-FAILURE is called with an alist holding
+its :name and the error :message.
+
+For example:
+
+  (agent-shell--resolve-environment-variables
+   :environment-variables (list \"A=1\" (cons \"B\" (lambda () \"2\"))))
+  ;; => (\"A=1\" \"B=2\")"
+  (seq-mapcat (lambda (variable)
+                (if (stringp variable)
+                    (list variable)
+                  (condition-case err
+                      (list (format "%s=%s"
+                                    (car variable)
+                                    (or (funcall (cdr variable))
+                                        (error "Function returned nil"))))
+                    (error
+                     (when on-failure
+                       (funcall on-failure
+                                `((:name . ,(car variable))
+                                  (:message . ,(error-message-string err)))))
+                     nil))))
+              environment-variables))
 
 (defvar-local agent-shell--header-cache nil
   "Cache for graphical headers (no need for regenerating regularly).
@@ -7342,8 +7459,15 @@ recorded in STATE and released by `agent-shell--uninhibit-sleep'."
     ;; Report the failure so the user can set `agent-shell-inhibit-system-sleep'
     ;; to nil to opt out.
     (condition-case err
-        (when-let* ((token (system-sleep-block-sleep "agent-shell (agent busy)" t)))
-          (map-put! state :sleep-token token))
+        (let ((token (system-sleep-block-sleep "agent-shell (agent busy)" t)))
+          (cond
+           ((consp token)
+            (map-put! state :sleep-token token))
+           ;; Some failures (e.g. logind requiring interactive polkit
+           ;; authorization) don't signal.  `system-sleep' warns instead
+           ;; and returns `warn''s t, which isn't a token to release later.
+           (token
+            (message "Sleep inhibit unavailable.  Set `agent-shell-inhibit-system-sleep' to nil to disable."))))
       (error
        (message "Sleep inhibit unavailable (%s).  Set `agent-shell-inhibit-system-sleep' to nil to disable."
                 (error-message-string err))))))
@@ -7434,6 +7558,36 @@ the original EVENT as :idle-event."
 
 ;;; Initialization
 
+(defun agent-shell--resolve-client-environment-variables ()
+  "Resolve the deferred environment variables of the shell's client.
+
+Resolving here, rather than in the client maker, calls each deferred
+value once per agent start.  `agent-shell--start' also calls the client
+maker to validate the agent's executable, and secrets must not be
+looked up (or prompted for) on those calls.
+
+Values that fail to resolve are left out of the agent's environment and
+reported in a warning above the prompt."
+  (when-let* ((client (map-elt (agent-shell--state) :client))
+              ((map-contains-key client :environment-variables)))
+    (let* ((failures nil)
+           (resolved (agent-shell--resolve-environment-variables
+                      :environment-variables (map-elt client :environment-variables)
+                      :on-failure (lambda (failure)
+                                    (push (format "%s: %s"
+                                                  (map-elt failure :name)
+                                                  (map-elt failure :message))
+                                          failures)))))
+      (map-put! client :environment-variables resolved)
+      (when failures
+        (agent-shell--update-bootstrapping-fragment
+         :state (agent-shell--state)
+         :block-id "environment-unresolved"
+         :body (agent-shell--make-boxed-message
+                :text (format "Warning: Could not resolve environment variables (omitted):
+
+%s" (string-join (nreverse failures) "\n"))))))))
+
 (cl-defun agent-shell--initialize-client ()
   "Initialize ACP client."
   (agent-shell--update-bootstrapping-fragment
@@ -7449,6 +7603,7 @@ the original EVENT as :idle-event."
         (map-put! (agent-shell--state)
                   :client (funcall (map-elt agent-shell--state :client-maker)
                                    (map-elt agent-shell--state :buffer)))
+        (agent-shell--resolve-client-environment-variables)
         (agent-shell--emit-event :event 'init-client)
         t)
     (agent-shell--update-fragment
@@ -8830,13 +8985,10 @@ listing sessions to pick one to load."
                                         (propertize "Forked session" 'font-lock-face 'agent-shell-section-heading))
                     :expanded t
                     :body (or new-session-id ""))
-                   ;; Some agents (e.g. claude-agent-acp) fork by copying the
-                   ;; transcript only, returning neither models nor modes and
-                   ;; leaving the new session inactive (prompts fail with
-                   ;; "Session not found").  Resuming activates it and also
-                   ;; replays the forked history when loading.
-                   (if (or (map-elt (agent-shell--state) :supports-session-load)
-                           (map-elt (agent-shell--state) :supports-session-resume))
+                   ;; The fork is already active, so only load it when that
+                   ;; replays history.  Resuming would add nothing.
+                   (if (and agent-shell-session-fork-restore-history
+                            (agent-shell--use-session-load-p (agent-shell--state)))
                        (agent-shell--initiate-session-resume-by-id
                         :session-id new-session-id
                         :shell-buffer shell-buffer
@@ -8844,7 +8996,7 @@ listing sessions to pick one to load."
                         ;; The fork itself succeeded, so stay on it rather
                         ;; than falling back to picking another session.
                         :on-failure (lambda ()
-                                      (let ((text "Couldn't load forked session. Prompts may fail."))
+                                      (let ((text "Couldn't restore forked session history."))
                                         (message "%s" text)
                                         (agent-shell--update-bootstrapping-fragment
                                          :state (agent-shell--state)
@@ -9637,9 +9789,12 @@ reads the buffer's prompt capabilities."
                     :last-entry-type (map-elt (agent-shell--state) :last-entry-type)
                     :file-path agent-shell--transcript-file)
                    ;; Tool call details are no longer needed after
-                   ;; a session prompt request is finished.
+                   ;; a session prompt request is finished, unless
+                   ;; their updates are still arriving out of turn.
                    ;; Avoid accumulating them unnecessarily.
-                   (map-put! (agent-shell--state) :tool-calls nil)
+                   (map-put! (agent-shell--state) :tool-calls
+                             (agent-shell--unfinished-tool-calls
+                              :tool-calls (map-elt (agent-shell--state) :tool-calls)))
                    (agent-shell-elicitation--clear :state (agent-shell--state))
                    ;; The turn is over, so nothing is active any more: fold
                    ;; the last activity group `latest' left expanded.
@@ -9715,6 +9870,12 @@ Continue?" (agent-shell--prompt-queue-summary)))
                    (agent-shell--separate-transcript-after-agent-message
                     :last-entry-type (map-elt agent-shell--state :last-entry-type)
                     :file-path agent-shell--transcript-file)
+                   ;; The turn is over, so tidy up its tool calls and
+                   ;; forms just as a successful turn does.
+                   (map-put! agent-shell--state :tool-calls
+                             (agent-shell--unfinished-tool-calls
+                              :tool-calls (map-elt agent-shell--state :tool-calls)))
+                   (agent-shell-elicitation--clear :state agent-shell--state)
                    ;; An interrupted turn leaves no group active either.
                    (agent-shell--collapse-expanded-activity-group agent-shell--state)
                    ;; Display pending requests on failure.
@@ -10509,7 +10670,7 @@ MESSAGE-TEXT: Optional message to display after sending the response."
     (agent-shell--delete-fragment :state state :block-id (format "permission-%s" tool-call-id))
     ;; Note: Tool call data is no longer deleted here intentionally.
     ;; Subsequent tool_call_update notifications still need the data.
-    ;; It gets cleared at end of turn with all tool calls.
+    ;; It gets cleared at end of turn once its group finishes.
     ;;
     ;; Do clear :permission-request-id so consumers can distinguish
     ;; between a pending permission request and one already answered.
