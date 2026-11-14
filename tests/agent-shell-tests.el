@@ -4699,10 +4699,11 @@ A failed load stays on the fork."
         (should session-init-called)
         (should (equal (map-nested-elt agent-shell--state '(:session :id)) "new-session-456"))))))
 
-(ert-deftest agent-shell--initiate-session-fork-resumes-forked-session ()
-  "Test `agent-shell--initiate-session' resumes the id session/fork returned."
+(ert-deftest agent-shell--initiate-session-fork-binds-forked-session ()
+  "Test `agent-shell--initiate-session' binds the id session/fork returned."
   (with-temp-buffer
     (let* ((agent-shell-session-strategy 'latest)
+           (agent-shell-session-fork-restore-history nil)
            (requests '())
            (session-init-called nil)
            (state (list (cons :buffer (current-buffer))
@@ -4754,19 +4755,19 @@ A failed load stays on the fork."
           (should (equal (mapcar (lambda (req)
                                    (map-elt (plist-get req :request) :method))
                                  ordered-requests)
-                         '("session/fork" "session/resume")))
-          (let ((fork-params (map-elt (plist-get (nth 0 ordered-requests) :request) :params))
-                (resume-params (map-elt (plist-get (nth 1 ordered-requests) :request) :params)))
-            (should (equal (map-elt fork-params 'sessionId) "parent-session-123"))
-            (should (equal (map-elt resume-params 'sessionId) "forked-session-456"))
-            (should (equal (map-elt resume-params 'cwd) "/tmp"))))
+                         '("session/fork")))
+          (should (equal (map-elt (map-elt (plist-get (nth 0 ordered-requests) :request) :params)
+                                  'sessionId)
+                         "parent-session-123")))
         (should session-init-called)
         (should (equal (map-nested-elt agent-shell--state '(:session :id)) "forked-session-456"))))))
 
-(ert-deftest agent-shell--initiate-session-fork-loads-when-resume-unsupported ()
-  "Test post-fork binding falls back to session/load without session/resume."
+(ert-deftest agent-shell--initiate-session-fork-loads-to-restore-history ()
+  "Test the forked session is loaded when restoring its history."
   (with-temp-buffer
     (let* ((agent-shell-session-strategy 'latest)
+           (agent-shell-session-fork-restore-history t)
+           (agent-shell-session-restore-verbosity 'full)
            (requests '())
            (session-init-called nil)
            (state (list (cons :buffer (current-buffer))

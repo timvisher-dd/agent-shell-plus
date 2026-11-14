@@ -44,14 +44,10 @@ breadcrumb at the end of each says where the behaviour lives now.
 - Keep point with the prompt across streamed fragment and text inserts, so a
   fragment rendered while the cursor sits at the prompt no longer strands point
   above the inserted text ([[https://github.com/timvisher-dd/agent-shell-plus/pull/13][#13]])
-- Bind a live session to the id =session/fork= returns, by chaining
-  =session/resume= (or =session/load= when resume is unsupported) before the
-  shell finishes initializing.  Without it, recent claude-agent-acp forks are
-  dead on arrival: the first prompt fails with =-32603= "Session not found".
-  The root cause is in claude-agent-acp, reported as
-  [[https://github.com/agentclientprotocol/claude-agent-acp/issues/1110][claude-agent-acp#1110]]
-  and unfixed; this is a client-side workaround that becomes redundant if that
-  lands ([[https://github.com/timvisher-dd/agent-shell-plus/pull/14][#14]])
+- +Bind a live session to the id =session/fork= returns+
+  ([[https://github.com/timvisher-dd/agent-shell-plus/pull/14][#14]] → dropped; claude-agent-acp 0.90.0 activates forked sessions
+  itself, and upstream now only loads a fork when
+  =agent-shell-session-fork-restore-history= asks to replay its history)
 
 Two pieces of [[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]] were dropped outright rather than replaced — upstream has no
 equivalent, so these are regressions rather than migrations:
