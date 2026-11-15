@@ -154,8 +154,12 @@ jobs:
         with:
           version: 29.4
 
+      # No -follow.  Here deps/* are real checkouts, so find descends them
+      # either way; on a developer's machine they are symlinks to live
+      # worktrees of other projects, and -follow made this delete their
+      # byte-compiled files -- including ones those projects track.
       - name: Remove stale .elc files
-        run: find . deps -follow -name '*.elc' -print0 | xargs -0 rm -f
+        run: find . deps -name '*.elc' -print0 | xargs -0 rm -f
 
       - name: Byte-compile
         run: |

@@ -19,9 +19,18 @@ then
   exit 1
 fi
 
-# Resolve local dependency paths — CI checks these out via actions/checkout
-acp_root=${acp_root:-../../acp.el-plus/main}
-shell_maker_root=${shell_maker_root:-../../shell-maker/main}
+# Resolve local dependency paths — CI checks these out via actions/checkout,
+# from xenodium in both cases, so default to the same thing here.  These
+# paths are not cosmetic: the script relinks deps/ to them below, so a
+# default pointing at the acp.el-plus fork silently undoes the repointing
+# that CI relies on (agent-shell-gzb).
+#
+# Anchored at the worktree root, not relative to it: a branch with a slash
+# in its name sits a directory deeper than dev or main, so a ../.. default
+# resolves somewhere different depending on which branch you are on.
+git_home=${TIMVISHER_GIT_HOME:-${HOME}/git}
+acp_root=${acp_root:-${git_home}/xenodium/acp.el/main}
+shell_maker_root=${shell_maker_root:-${git_home}/xenodium/shell-maker/main}
 
 die=0
 if ! [[ -r ${acp_root}/acp.el ]]

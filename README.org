@@ -8,12 +8,15 @@ A soft fork of [[https://github.com/xenodium/agent-shell][agent-shell]] with ext
 Struck-through entries were removed when merging upstream 0.75.2.  The
 breadcrumb at the end of each says where the behaviour lives now.
 
-- CI workflow and local test runner ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/6][#6]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]])
+- CI workflow and local test runner ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/6][#6]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/15][#15]])
   - Byte-compilation of all =.el= files ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]])
   - ERT test suite ([[https://github.com/timvisher-dd/agent-shell-plus/pull/1][#1]])
   - README update check when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])
   - Dependency DAG check (=require= graph must be acyclic) ([[https://github.com/timvisher-dd/agent-shell-plus/pull/7][#7]])
   - Agent config symlink check (=.agents= entrypoints resolve)
+  - A local run resolves the same dependencies CI does, and its stale-=.elc=
+    sweep stays inside the repo instead of following =deps/= symlinks into
+    other projects ([[https://github.com/timvisher-dd/agent-shell-plus/pull/15][#15]])
 - Per-shell debug logging infrastructure ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]])
 - Regression tests for shell buffer selection ordering ([[https://github.com/timvisher-dd/agent-shell-plus/pull/3][#3]])
 - CI check that README.org is updated when code changes ([[https://github.com/timvisher-dd/agent-shell-plus/pull/4][#4]])
@@ -38,7 +41,7 @@ breadcrumb at the end of each says where the behaviour lives now.
 - +=gfm-mode= compose buffer for the interactive =agent-shell-queue-request=+
   ([[https://github.com/timvisher-dd/agent-shell-plus/pull/9][#9]] → [[https://github.com/xenodium/agent-shell/commit/6ae3fdb][agent-shell-prompt-queue.el]])
 - +Desktop notifications when the prompt is idle and waiting for input+
-  ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]] → moved to =timvisher-agent-shell-alert.el= in the IDE repo;
+  ([[https://github.com/timvisher-dd/agent-shell-plus/pull/2][#2]], [[https://github.com/timvisher-dd/agent-shell-plus/pull/8][#8]] → moved out to a downstream =timvisher-agent-shell-alert.el=;
   upstream emits the =idle= event but leaves delivery to the consumer)
 - =agent-shell-resume-session= repurposed from an ID-prompt command into a session-picker entry point: opens the same fuzzy-completion picker that =agent-shell-session-strategy= ='prompt= uses, and force-shows session IDs in the picker (via a new =:show-session-id= keyword on =agent-shell--start=) so users with an ID in hand can find it via their completion framework ([[https://github.com/timvisher-dd/agent-shell-plus/pull/11][#11]])
 - Keep point with the prompt across streamed fragment and text inserts, so a
